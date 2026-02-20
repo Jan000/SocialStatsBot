@@ -37,6 +37,27 @@ class AdminCog(commands.Cog, name="Admin"):
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
 
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        """Handle errors for all commands in this cog."""
+        original = getattr(error, "original", error)
+
+        if isinstance(original, discord.Forbidden):
+            msg = (
+                "❌ **Fehlende Berechtigungen!** Der Bot braucht die Berechtigung "
+                "**\"Rollen verwalten\"** und seine Rolle muss in der Hierarchie "
+                "über den zu verwaltenden Rollen stehen."
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        # Re-raise unhandled errors
+        raise error
+
     # ── Link YouTube ─────────────────────────────────────────────────
 
     @app_commands.command(name="link_youtube", description="Verknüpfe einen Discord-User mit einem YouTube-Kanal.")

@@ -4,10 +4,14 @@ Role manager – creates, assigns, and cleans up subscriber/follower roles.
 
 from __future__ import annotations
 
+import logging
+
 import discord
 from typing import Optional
 
 from bot.database import Database
+
+log = logging.getLogger(__name__)
 
 # Prefix used to identify bot-managed roles so we don't touch user roles.
 ROLE_MANAGED_PREFIX_YT = "[YT] "
@@ -28,12 +32,18 @@ async def get_or_create_role(
     role_name: str,
     role_color: int,
 ) -> discord.Role:
-    """Find an existing role by name or create a new one."""
+    """Find an existing role by name or create a new one.
+
+    Raises discord.Forbidden if the bot lacks Manage Roles permission.
+    """
     for role in guild.roles:
         if role.name == role_name:
             # Update colour if changed
             if role.color.value != role_color:
-                await role.edit(color=discord.Color(role_color))
+                try:
+                    await role.edit(color=discord.Color(role_color))
+                except discord.Forbidden:
+                    log.warning("Cannot edit role '%s' – missing permissions.", role_name)
             return role
     return await guild.create_role(
         name=role_name,
@@ -76,6 +86,9 @@ async def update_member_role(
     """
     Assign the new role to the member and remove any old bot-managed
     roles for the same platform.
+
+    Raises discord.Forbidden if the bot lacks Manage Roles permission
+    or if the target role is above the bot's highest role.
     """
     prefix = _platform_prefix(platform)
     # Get or create the target role

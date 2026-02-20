@@ -25,17 +25,16 @@ async def test_guild_settings_default(db: Database):
     """get_guild_settings should create defaults on first access."""
     settings = await db.get_guild_settings(123)
     assert settings["guild_id"] == 123
-    assert settings["yt_scoreboard_size"] == 10
     assert settings["tw_refresh_interval"] == 600
 
 
 @pytest.mark.asyncio
 async def test_update_guild_setting(db: Database):
     settings = await db.get_guild_settings(1)
-    assert settings["yt_scoreboard_size"] == 10
-    await db.update_guild_setting(1, "yt_scoreboard_size", 25)
+    assert settings["yt_refresh_interval"] == 600
+    await db.update_guild_setting(1, "yt_refresh_interval", 300)
     settings = await db.get_guild_settings(1)
-    assert settings["yt_scoreboard_size"] == 25
+    assert settings["yt_refresh_interval"] == 300
 
 
 @pytest.mark.asyncio

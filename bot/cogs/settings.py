@@ -63,7 +63,6 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         lines = [
             "**⚙️ Aktuelle Einstellungen:**\n",
             f"📺 **YouTube Scoreboard-Kanal:** {ch(s['yt_scoreboard_channel_id'])}",
-            f"📺 **YouTube Scoreboard-Größe:** {s['yt_scoreboard_size']}",
             f"📺 **YouTube Refresh-Intervall:** {s['yt_refresh_interval']}s",
             f"📺 **YouTube Rollen-Pattern:** `{s['yt_default_role_pattern']}`",
             f"📺 **YouTube Rollen-Farbe:** #{s['yt_default_role_color']:06X}",
@@ -71,7 +70,6 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
             f"📺 **YouTube Zähler-Pattern:** `{s.get('yt_count_channel_pattern', '📺 {count} YouTube Abos')}`",
             "",
             f"🎮 **Twitch Scoreboard-Kanal:** {ch(s['tw_scoreboard_channel_id'])}",
-            f"🎮 **Twitch Scoreboard-Größe:** {s['tw_scoreboard_size']}",
             f"🎮 **Twitch Refresh-Intervall:** {s['tw_refresh_interval']}s",
             f"🎮 **Twitch Rollen-Pattern:** `{s['tw_default_role_pattern']}`",
             f"🎮 **Twitch Rollen-Farbe:** #{s['tw_default_role_color']:06X}",
@@ -103,32 +101,6 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         await self.bot.db.update_guild_setting(interaction.guild_id, key, channel.id)
         await interaction.response.send_message(
             f"✅ {platform.name} Scoreboard-Kanal auf {channel.mention} gesetzt.",
-            ephemeral=True,
-        )
-
-    # ── /settings scoreboard_size ────────────────────────────────────
-
-    @app_commands.command(
-        name="scoreboard_size",
-        description="Setzt die maximale Anzahl an Einträgen im Scoreboard.",
-    )
-    @app_commands.describe(platform="Plattform", size="Anzahl (1–50)")
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
-    async def scoreboard_size(
-        self,
-        interaction: discord.Interaction,
-        platform: app_commands.Choice[str],
-        size: app_commands.Range[int, 1, 50],
-    ) -> None:
-        key = "yt_scoreboard_size" if platform.value == "youtube" else "tw_scoreboard_size"
-        await self.bot.db.update_guild_setting(interaction.guild_id, key, size)
-        await interaction.response.send_message(
-            f"✅ {platform.name} Scoreboard-Größe auf **{size}** gesetzt.",
             ephemeral=True,
         )
 

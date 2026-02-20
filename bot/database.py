@@ -26,8 +26,6 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id          INTEGER PRIMARY KEY,
     yt_scoreboard_channel_id   INTEGER DEFAULT 0,
     tw_scoreboard_channel_id   INTEGER DEFAULT 0,
-    yt_scoreboard_size         INTEGER DEFAULT 10,
-    tw_scoreboard_size         INTEGER DEFAULT 10,
     yt_refresh_interval        INTEGER DEFAULT 600,
     tw_refresh_interval        INTEGER DEFAULT 600,
     yt_default_role_pattern    TEXT    DEFAULT '{name} - {count} Abos',
@@ -215,8 +213,6 @@ class Database:
         allowed = {
             "yt_scoreboard_channel_id",
             "tw_scoreboard_channel_id",
-            "yt_scoreboard_size",
-            "tw_scoreboard_size",
             "yt_refresh_interval",
             "tw_refresh_interval",
             "yt_default_role_pattern",

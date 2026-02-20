@@ -74,7 +74,6 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 |---|---|
 | `/settings show` | Alle Einstellungen anzeigen |
 | `/settings scoreboard_channel <platform> <channel>` | Scoreboard-Channel setzen |
-| `/settings scoreboard_size <platform> <size>` | Anzahl Einträge im Scoreboard (1–50) |
 | `/settings refresh_interval <platform> <seconds>` | Refresh-Intervall in Sekunden (60–86400) |
 | `/settings role_pattern <platform> <pattern>` | Rollen-Pattern (`{name}` und `{count}` als Platzhalter) |
 | `/settings role_color <platform> <hex_color>` | Standard-Rollen-Farbe |

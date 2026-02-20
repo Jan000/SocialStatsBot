@@ -456,24 +456,34 @@ class Database:
 
     # ── Scoreboard messages ──────────────────────────────────────────
 
-    async def get_scoreboard_message(
+    async def get_scoreboard_message_ids(
         self, guild_id: int, platform: str
-    ) -> Optional[dict]:
+    ) -> list[int]:
+        """Return stored scoreboard message IDs for a guild+platform.
+
+        Handles both legacy single-integer values and the newer
+        comma-separated format transparently.
+        """
         async with self.db.execute(
-            "SELECT * FROM scoreboard_messages WHERE guild_id = ? AND platform = ?",
+            "SELECT message_id FROM scoreboard_messages WHERE guild_id = ? AND platform = ?",
             (guild_id, platform),
         ) as cur:
             row = await cur.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return []
+        raw = str(row[0])
+        return [int(x) for x in raw.split(",") if x.strip()]
 
-    async def set_scoreboard_message(
-        self, guild_id: int, platform: str, channel_id: int, message_id: int
+    async def set_scoreboard_message_ids(
+        self, guild_id: int, platform: str, channel_id: int, message_ids: list[int]
     ) -> None:
+        """Store scoreboard message IDs (comma-separated) for a guild+platform."""
+        ids_str = ",".join(str(mid) for mid in message_ids)
         await self.db.execute(
             """INSERT INTO scoreboard_messages (guild_id, platform, channel_id, message_id)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(guild_id, platform)
                DO UPDATE SET channel_id = excluded.channel_id, message_id = excluded.message_id""",
-            (guild_id, platform, channel_id, message_id),
+            (guild_id, platform, channel_id, ids_str),
         )
         await self.db.commit()

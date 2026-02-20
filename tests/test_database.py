@@ -217,15 +217,14 @@ async def test_remove_role_design(db: Database):
 
 @pytest.mark.asyncio
 async def test_scoreboard_message(db: Database):
-    msg = await db.get_scoreboard_message(1, "youtube")
-    assert msg is None
+    ids = await db.get_scoreboard_message_ids(1, "youtube")
+    assert ids == []
 
-    await db.set_scoreboard_message(1, "youtube", 999, 12345)
-    msg = await db.get_scoreboard_message(1, "youtube")
-    assert msg is not None
-    assert msg["message_id"] == 12345
+    await db.set_scoreboard_message_ids(1, "youtube", 999, [12345])
+    ids = await db.get_scoreboard_message_ids(1, "youtube")
+    assert ids == [12345]
 
-    # Upsert
-    await db.set_scoreboard_message(1, "youtube", 999, 67890)
-    msg = await db.get_scoreboard_message(1, "youtube")
-    assert msg["message_id"] == 67890
+    # Upsert with two message IDs
+    await db.set_scoreboard_message_ids(1, "youtube", 999, [12345, 67890])
+    ids = await db.get_scoreboard_message_ids(1, "youtube")
+    assert ids == [12345, 67890]

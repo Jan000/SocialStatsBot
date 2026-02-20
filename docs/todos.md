@@ -1,4 +1,4 @@
-# Offene Aufgaben – NirukiSocialStats Discord Bot
+# Offene Aufgaben – Social-Stats-Bot
 
 **Stand:** 2026-02-20
 

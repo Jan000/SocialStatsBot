@@ -1,4 +1,4 @@
-# Copilot Instructions – NirukiSocialStats Discord Bot
+# Copilot Instructions – Social-Stats-Bot
 
 ## Projektübersicht
 
@@ -64,17 +64,28 @@ docs/
 - **Multi-Account**: UNIQUE auf `(guild_id, discord_user_id, platform, platform_id)` – ein User kann mehrere Accounts pro Plattform haben
 - **History-Deduplizierung**: Bei gleichbleibendem Count werden nur Start- und End-Zeitstempel gespeichert
 
+### Datenbank-Migrationen
+- **Der gegenwärtige Zustand der Datenbank ist immer unbekannt** – die `_migrate()`-Methode muss mit jeder möglichen Schema-Version umgehen
+- **Bei jeder Schema-Änderung** muss eine Migration in `Database._migrate()` hinzugefügt werden
+- Migrationen laufen automatisch bei jedem Bot-Start (in `connect()`)
+- Jede Migration prüft via `PRAGMA table_info()` / `PRAGMA index_list()` ob die Änderung bereits angewendet wurde
+- Migrationen sind idempotent – sie dürfen beliebig oft laufen ohne Fehler
+- Das statische `_SCHEMA` enthält nur `CREATE TABLE IF NOT EXISTS` – neue Spalten/Indizes werden via `ALTER TABLE` in `_migrate()` hinzugefügt
+- Reihenfolge in `_migrate()`: Erst Spalten hinzufügen, dann Indizes erstellen
+
 ### Slash-Commands
 - Alle Commands nutzen `@app_commands.command()` (discord.py 2.x Slash-Commands)
 - Admin-Einschränkung über `@app_commands.default_permissions(administrator=True)` auf GroupCog-Ebene
 - Plattform-Auswahl über `@app_commands.choices(platform=[...])` mit `youtube`/`twitch`
+- **Autocomplete** für Account-Namen (`account_name`) und Rollen-Design-IDs (`design_id`)
+- Autocomplete-Methode `_account_autocomplete` liest `interaction.namespace.user` + `interaction.namespace.platform`
 - Responses sind auf Deutsch
 - Ephemeral-Responses für Admin-Commands (`ephemeral=True`)
 
 ### Rollen-System
 - Bot-verwaltete Rollen haben Prefixe: `[YouTube] ` für YouTube, `[Twitch] ` für Twitch
 - `{count}` und `{name}` sind Platzhalter in Rollen-Patterns
-- Beispiel: `[YouTube] Niruki - 1.234 Abos`
+- Beispiel: `[YouTube] MeinKanal - 1.234 Abos`
 - Jeder Account bekommt seine eigene Rolle
 - Nicht mehr benutzte Rollen werden automatisch gelöscht (`cleanup_unused_roles`)
 - Rollen-Design-Priorität: exakter Match > Bereichs-Match > Standard-Pattern

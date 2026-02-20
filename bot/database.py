@@ -101,24 +101,6 @@ class Database:
         await self._db.commit()
 
     async def _migrate(self) -> None:
-        """Apply schema migrations for existing databases."""
-        assert self._db is not None
-        # Check if sub_history has platform_id column (added in v2)
-        cursor = await self._db.execute("PRAGMA table_info(sub_history)")
-        columns = {row[1] for row in await cursor.fetchall()}
-        if "platform_id" not in columns:
-            log.info("Migrating sub_history: adding platform_id column")
-            await self._db.execute(
-                "ALTER TABLE sub_history ADD COLUMN platform_id TEXT NOT NULL DEFAULT ''"
-            )
-        # Now safe to create index that references platform_id
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_history_account "
-            "ON sub_history(guild_id, discord_user_id, platform, platform_id)"
-        )
-        await self._migrate()
-
-    async def _migrate(self) -> None:
         """Run migrations for schema changes on existing databases."""
         try:
             # Migration: multi-account support (old UNIQUE was guild+user+platform)
@@ -161,6 +143,12 @@ class Database:
                     "ALTER TABLE sub_history ADD COLUMN platform_id TEXT NOT NULL DEFAULT ''"
                 )
                 await self.db.commit()
+
+            # Create index on platform_id (safe now that column exists)
+            await self.db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_history_account "
+                "ON sub_history(guild_id, discord_user_id, platform, platform_id)"
+            )
 
             # Migration: update default role patterns from old format
             await self.db.execute("""

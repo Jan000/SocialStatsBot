@@ -33,6 +33,31 @@ class StatsCog(commands.GroupCog, group_name="stats"):
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
 
+    # ── Autocomplete helpers ─────────────────────────────────────────
+
+    async def _account_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for account_name parameters."""
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+
+        user = getattr(interaction.namespace, "user", None)
+        platform = getattr(interaction.namespace, "platform", None)
+        if not user or not platform:
+            return []
+
+        user_id = user.id if hasattr(user, "id") else int(user)
+        plat = platform.value if hasattr(platform, "value") else str(platform)
+
+        accounts = await self.bot.db.get_linked_accounts_for_user(guild_id, user_id, plat)
+        return [
+            app_commands.Choice(name=a["platform_name"], value=a["platform_name"])
+            for a in accounts
+            if a["platform_name"] and current.lower() in a["platform_name"].lower()
+        ][:25]
+
     # ── /stats growth ────────────────────────────────────────────────
 
     @app_commands.command(
@@ -115,6 +140,12 @@ class StatsCog(commands.GroupCog, group_name="stats"):
         embed.set_footer(text=f"Ältester Datenpunkt: {oldest_ts:%d.%m.%Y %H:%M} UTC")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @growth.autocomplete("account_name")
+    async def _growth_account_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return await self._account_autocomplete(interaction, current)
 
     # ── /stats overview ──────────────────────────────────────────────
 

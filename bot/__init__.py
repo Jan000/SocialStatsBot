@@ -1,1 +1,1 @@
-"""NirukiSocialStats Discord Bot package."""
+"""Social-Stats-Bot Discord Bot package."""

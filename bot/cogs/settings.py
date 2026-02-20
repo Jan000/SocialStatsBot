@@ -25,6 +25,32 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
 
+    # ── Autocomplete helpers ─────────────────────────────────────────
+
+    async def _design_id_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        """Autocomplete for design_id – shows all role designs in this guild."""
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+
+        choices: list[app_commands.Choice[int]] = []
+        for plat in ("youtube", "twitch"):
+            designs = await self.bot.db.get_role_designs(guild_id, plat)
+            for d in designs:
+                if d["exact_count"] is not None:
+                    scope = f"Exakt {d['exact_count']}"
+                elif d["range_max"]:
+                    scope = f"{d['range_min']}–{d['range_max']}"
+                else:
+                    scope = f"Ab {d['range_min']}"
+                label = f"#{d['id']} {plat.title()} | {scope} | {d['role_pattern']}"
+                if current and current not in str(d["id"]) and current.lower() not in label.lower():
+                    continue
+                choices.append(app_commands.Choice(name=label[:100], value=d["id"]))
+        return choices[:25]
+
     # ── /settings show ───────────────────────────────────────────────
 
     @app_commands.command(name="show", description="Zeigt die aktuellen Einstellungen.")
@@ -352,6 +378,12 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
             await interaction.response.send_message(
                 f"❌ Kein Rollen-Design mit ID **{design_id}** gefunden.", ephemeral=True
             )
+
+    @remove_role_design.autocomplete("design_id")
+    async def _remove_design_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        return await self._design_id_autocomplete(interaction, current)
 
     # ── Error handler ────────────────────────────────────────────────
 

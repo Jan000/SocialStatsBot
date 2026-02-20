@@ -34,6 +34,31 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
 
+    # ── Autocomplete helpers ─────────────────────────────────────────
+
+    async def _account_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for account_name parameters (needs user + platform in namespace)."""
+        guild_id = interaction.guild_id
+        if not guild_id:
+            return []
+
+        user = getattr(interaction.namespace, "user", None)
+        platform = getattr(interaction.namespace, "platform", None)
+        if not user or not platform:
+            return []
+
+        user_id = user.id if hasattr(user, "id") else int(user)
+        plat = platform.value if hasattr(platform, "value") else str(platform)
+
+        accounts = await self.bot.db.get_linked_accounts_for_user(guild_id, user_id, plat)
+        return [
+            app_commands.Choice(name=a["platform_name"], value=a["platform_name"])
+            for a in accounts
+            if a["platform_name"] and current.lower() in a["platform_name"].lower()
+        ][:25]
+
     # ── /admin link_youtube ──────────────────────────────────────────
 
     @app_commands.command(
@@ -187,6 +212,12 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             f"✅ **{platform_name}** ({platform.name}) von {user.mention} entfernt.",
             ephemeral=True,
         )
+
+    @unlink.autocomplete("account_name")
+    async def _unlink_account_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return await self._account_autocomplete(interaction, current)
 
     # ── /admin accounts ──────────────────────────────────────────────
 
@@ -374,6 +405,12 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         else:
             view = PaginationView(pages, author_id=interaction.user.id)
             await interaction.followup.send(embed=pages[0], view=view, ephemeral=True)
+
+    @history.autocomplete("account_name")
+    async def _history_account_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return await self._account_autocomplete(interaction, current)
 
     # ── Helpers ──────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-# Projektstatus – NirukiSocialStats Discord Bot
+# Projektstatus – Social-Stats-Bot
 
 **Stand:** 2026-02-20  
 **Phase:** Feature-Complete

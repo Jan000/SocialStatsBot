@@ -56,8 +56,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 
 | Command | Beschreibung |
 |---|---|
-| `/admin link_youtube <user> <channel_input>` | YouTube-Kanal verknüpfen (URL, @Handle oder ID) |
-| `/admin link_twitch <user> <channel_input>` | Twitch-Account verknüpfen (URL oder Login-Name) |
+| `/admin link <user> <platform> <channel_input>` | YouTube-/Twitch-Kanal verknüpfen (URL, Handle, Login oder ID) |
 | `/admin unlink <user> <platform> <account_name>` | Bestimmten Account entfernen (Autocomplete) |
 | `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen (paginiert) |
 | `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |

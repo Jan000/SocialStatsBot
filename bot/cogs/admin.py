@@ -58,106 +58,75 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             if a["platform_name"] and current.lower() in a["platform_name"].lower()
         ][:25]
 
-    # ── /admin link_youtube ──────────────────────────────────────────
+    # ── /admin link ────────────────────────────────────────────────
 
     @app_commands.command(
-        name="link_youtube",
-        description="Verknüpft einen YouTube-Kanal mit einem Discord-User.",
+        name="link",
+        description="Verknüpft einen YouTube- oder Twitch-Kanal mit einem Discord-User.",
     )
     @app_commands.describe(
         user="Discord-User",
-        channel_input="YouTube-Kanal (URL, @Handle oder Channel-ID)",
+        platform="Plattform",
+        channel_input="Kanal (URL, @Handle, Login-Name oder ID)",
     )
-    async def link_youtube(
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def link(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
+        platform: app_commands.Choice[str],
         channel_input: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        info = await self.bot.youtube.resolve_channel(channel_input)
-        if info is None:
-            await interaction.followup.send(
-                "❌ Konnte den YouTube-Kanal nicht finden. Prüfe die Eingabe.",
-                ephemeral=True,
-            )
-            return
-
-        channel_id = info["id"]
-        channel_name = info["title"]
-        sub_count = info["subscriber_count"]
-
-        await self.bot.db.link_account(
-            interaction.guild_id, user.id, "youtube", channel_id, channel_name
-        )
-        await self.bot.db.update_account_count(
-            interaction.guild_id, user.id, "youtube", channel_id, sub_count
-        )
-
-        # Assign role
-        settings = await self.bot.db.get_guild_settings(interaction.guild_id)
-        role_name, role_color = await compute_role_name_and_color(
-            self.bot.db, interaction.guild_id, "youtube", sub_count, settings, channel_name
-        )
-        await update_member_role(
-            interaction.guild, user, "youtube", channel_name, role_name, role_color
-        )
-
-        await interaction.followup.send(
-            f"✅ **{channel_name}** (YouTube) mit {user.mention} verknüpft.\n"
-            f"Aktuelle Abos: **{sub_count:,}**".replace(",", "."),
-            ephemeral=True,
-        )
-
-    # ── /admin link_twitch ───────────────────────────────────────────
-
-    @app_commands.command(
-        name="link_twitch",
-        description="Verknüpft einen Twitch-Kanal mit einem Discord-User.",
-    )
-    @app_commands.describe(
-        user="Discord-User",
-        channel_input="Twitch-Kanal (URL oder Login-Name)",
-    )
-    async def link_twitch(
-        self,
-        interaction: discord.Interaction,
-        user: discord.Member,
-        channel_input: str,
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-
-        info = await self.bot.twitch.get_channel_info(channel_input)
-        if info is None:
-            await interaction.followup.send(
-                "❌ Konnte den Twitch-Kanal nicht finden. Prüfe die Eingabe.",
-                ephemeral=True,
-            )
-            return
-
-        twitch_id = info["id"]
-        display_name = info["display_name"]
-        follower_count = info["follower_count"]
+        if platform.value == "youtube":
+            info = await self.bot.youtube.resolve_channel(channel_input)
+            if info is None:
+                await interaction.followup.send(
+                    "❌ Konnte den YouTube-Kanal nicht finden. Prüfe die Eingabe.",
+                    ephemeral=True,
+                )
+                return
+            platform_id = info["id"]
+            platform_name = info["title"]
+            count = info["subscriber_count"]
+            count_label = "Abos"
+        else:
+            info = await self.bot.twitch.get_channel_info(channel_input)
+            if info is None:
+                await interaction.followup.send(
+                    "❌ Konnte den Twitch-Kanal nicht finden. Prüfe die Eingabe.",
+                    ephemeral=True,
+                )
+                return
+            platform_id = info["id"]
+            platform_name = info["display_name"]
+            count = info["follower_count"]
+            count_label = "Follower"
 
         await self.bot.db.link_account(
-            interaction.guild_id, user.id, "twitch", twitch_id, display_name
+            interaction.guild_id, user.id, platform.value, platform_id, platform_name
         )
         await self.bot.db.update_account_count(
-            interaction.guild_id, user.id, "twitch", twitch_id, follower_count
+            interaction.guild_id, user.id, platform.value, platform_id, count
         )
 
         settings = await self.bot.db.get_guild_settings(interaction.guild_id)
         role_name, role_color = await compute_role_name_and_color(
-            self.bot.db, interaction.guild_id, "twitch", follower_count, settings, display_name
+            self.bot.db, interaction.guild_id, platform.value, count, settings, platform_name
         )
         await update_member_role(
-            interaction.guild, user, "twitch", display_name, role_name, role_color
+            interaction.guild, user, platform.value, platform_name, role_name, role_color
         )
 
         await interaction.followup.send(
-            f"✅ **{display_name}** (Twitch) mit {user.mention} verknüpft.\n"
-            f"Aktuelle Follower: **{follower_count:,}**".replace(",", "."),
+            f"✅ **{platform_name}** ({platform.name}) mit {user.mention} verknüpft.\n"
+            f"Aktuelle {count_label}: **{count:,}**".replace(",", "."),
             ephemeral=True,
         )
 

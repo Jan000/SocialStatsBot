@@ -33,6 +33,17 @@ COUNT_LABEL = {
 _MAX_DESCRIPTION = 4096
 
 
+def _format_interval(seconds: int) -> str:
+    """Format an interval in seconds into a human-readable German string."""
+    if seconds >= 3600 and seconds % 3600 == 0:
+        h = seconds // 3600
+        return f"{h} Stunde" if h == 1 else f"{h} Stunden"
+    if seconds >= 60 and seconds % 60 == 0:
+        m = seconds // 60
+        return f"{m} Minute" if m == 1 else f"{m} Minuten"
+    return f"{seconds} Sekunde" if seconds == 1 else f"{seconds} Sekunden"
+
+
 async def build_scoreboard_embeds(
     db: Database,
     guild: discord.Guild,
@@ -78,12 +89,11 @@ async def build_scoreboard_embeds(
     # ── Timestamp / interval block (appended to last embed) ──────
     now_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
     next_ts = now_ts + interval
-    interval_min = max(1, interval // 60)
+    interval_label = _format_interval(interval)
     timestamp_block = (
         "\n\n─────────────────────────\n"
         f"🕐 Aktualisiert: <t:{now_ts}:R>\n"
-        f"⏭️ Nächste Aktualisierung: <t:{next_ts}:R>\n"
-        f"🔄 Intervall: **{interval_min} Minuten**"
+        f"⏭️ Nächste Aktualisierung: <t:{next_ts}:R> ({interval_label})"
     )
 
     # ── Try to fit everything into a single embed ────────────────

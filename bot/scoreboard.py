@@ -2,9 +2,9 @@
 
 All linked accounts are displayed (no limit).  When the embed
 description would exceed Discord's 4096-char cap the ranking is
-automatically split across two messages.  The last embed always
-contains a timestamp footer showing when the list was updated,
-when the next update is scheduled and the refresh interval.
+automatically split across two messages.  The last embed carries
+a footer with the next-update countdown, the interval and a native
+Discord timestamp for the last update.
 """
 
 from __future__ import annotations
@@ -29,6 +29,19 @@ COUNT_LABEL = {
     "twitch": "Follower",
 }
 
+PLATFORM_THUMBNAIL = {
+    "youtube": (
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/"
+        "0/09/YouTube_full-color_icon_%282017%29.svg/"
+        "200px-YouTube_full-color_icon_%282017%29.svg.png"
+    ),
+    "twitch": (
+        "https://upload.wikimedia.org/wikipedia/commons/thumb/"
+        "d/d3/Twitch_Glitch_Logo_Purple.svg/"
+        "200px-Twitch_Glitch_Logo_Purple.svg.png"
+    ),
+}
+
 # Discord hard-limit for a single embed description.
 _MAX_DESCRIPTION = 4096
 
@@ -42,6 +55,22 @@ def _format_interval(seconds: int) -> str:
         m = seconds // 60
         return f"{m} Minute" if m == 1 else f"{m} Minuten"
     return f"{seconds} Sekunde" if seconds == 1 else f"{seconds} Sekunden"
+
+
+def _apply_embed_chrome(
+    embed: discord.Embed,
+    platform: str,
+    now: datetime.datetime,
+    next_ts: int,
+    interval: int,
+) -> None:
+    """Set thumbnail, footer and timestamp on *embed* (mutates in-place)."""
+    thumb = PLATFORM_THUMBNAIL.get(platform)
+    if thumb:
+        embed.set_thumbnail(url=thumb)
+    interval_label = _format_interval(interval)
+    embed.set_footer(text=f"Nächste Aktualisierung: <t:{next_ts}:R> ({interval_label})")
+    embed.timestamp = now
 
 
 async def build_scoreboard_embeds(
@@ -63,6 +92,10 @@ async def build_scoreboard_embeds(
         else discord.Colour(0x6441A4)
     )
 
+    now = datetime.datetime.now(datetime.timezone.utc)
+    now_ts = int(now.timestamp())
+    next_ts = now_ts + interval
+
     accounts = await db.get_all_linked(guild.id, platform)
 
     if not accounts:
@@ -71,7 +104,13 @@ async def build_scoreboard_embeds(
             colour=colour,
             description="Noch keine Accounts verknüpft.",
         )
+        _apply_embed_chrome(embed, platform, now, next_ts, interval)
         return [embed]
+
+    # ── Summary line ─────────────────────────────────────────────
+    c_label = COUNT_LABEL.get(platform, "")
+    total = sum(a["current_count"] for a in accounts)
+    summary = f"**{len(accounts)}** Accounts • Gesamt: **{format_count(total)}** {c_label}\n"
 
     # ── Build ranking lines ──────────────────────────────────────
     lines: list[str] = []
@@ -81,36 +120,26 @@ async def build_scoreboard_embeds(
         member = guild.get_member(acc["discord_user_id"])
         display_name = member.display_name if member else f"User {acc['discord_user_id']}"
         count_str = format_count(acc["current_count"])
-        c_label = COUNT_LABEL.get(platform, "")
         pname = acc.get("platform_name", "")
         account_info = f" ({pname})" if pname else ""
         lines.append(f"{rank} {display_name}{account_info} – **{count_str}** {c_label}")
 
-    # ── Timestamp / interval block (appended to last embed) ──────
-    now_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-    next_ts = now_ts + interval
-    interval_label = _format_interval(interval)
-    timestamp_block = (
-        "\n\n─────────────────────────\n"
-        f"🕐 Aktualisiert: <t:{now_ts}:f>\n"
-        f"⏭️ Nächste Aktualisierung: <t:{next_ts}:R> ({interval_label})"
-    )
-
     # ── Try to fit everything into a single embed ────────────────
-    full_desc = "\n".join(lines) + timestamp_block
+    ranking_text = "\n".join(lines)
+    full_desc = f"{summary}\n{ranking_text}"
     if len(full_desc) <= _MAX_DESCRIPTION:
-        return [
-            discord.Embed(
-                title=f"{emoji}  {label} Scoreboard",
-                colour=colour,
-                description=full_desc,
-            )
-        ]
+        embed = discord.Embed(
+            title=f"{emoji}  {label} Scoreboard",
+            colour=colour,
+            description=full_desc,
+        )
+        _apply_embed_chrome(embed, platform, now, next_ts, interval)
+        return [embed]
 
     # ── Split into two embeds ────────────────────────────────────
     mid = len(lines) // 2
-    desc1 = "\n".join(lines[:mid])
-    desc2 = "\n".join(lines[mid:]) + timestamp_block
+    desc1 = f"{summary}\n" + "\n".join(lines[:mid])
+    desc2 = "\n".join(lines[mid:])
 
     # Safety: if even the second half exceeds the limit, truncate
     if len(desc2) > _MAX_DESCRIPTION:
@@ -121,11 +150,13 @@ async def build_scoreboard_embeds(
         colour=colour,
         description=desc1,
     )
+    embed1.set_thumbnail(url=PLATFORM_THUMBNAIL.get(platform, ""))
     embed2 = discord.Embed(
         title=f"{emoji}  {label} Scoreboard (2/2)",
         colour=colour,
         description=desc2,
     )
+    _apply_embed_chrome(embed2, platform, now, next_ts, interval)
     return [embed1, embed2]
 
 

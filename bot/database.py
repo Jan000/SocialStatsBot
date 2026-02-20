@@ -81,7 +81,6 @@ CREATE TABLE IF NOT EXISTS scoreboard_messages (
 
 CREATE INDEX IF NOT EXISTS idx_linked_guild ON linked_accounts(guild_id);
 CREATE INDEX IF NOT EXISTS idx_history_guild ON sub_history(guild_id, platform);
-CREATE INDEX IF NOT EXISTS idx_history_account ON sub_history(guild_id, discord_user_id, platform, platform_id);
 """
 
 
@@ -97,7 +96,26 @@ class Database:
         self._db = await aiosqlite.connect(str(self.path))
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
+        # Run migrations for existing databases
+        await self._migrate()
         await self._db.commit()
+
+    async def _migrate(self) -> None:
+        """Apply schema migrations for existing databases."""
+        assert self._db is not None
+        # Check if sub_history has platform_id column (added in v2)
+        cursor = await self._db.execute("PRAGMA table_info(sub_history)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "platform_id" not in columns:
+            log.info("Migrating sub_history: adding platform_id column")
+            await self._db.execute(
+                "ALTER TABLE sub_history ADD COLUMN platform_id TEXT NOT NULL DEFAULT ''"
+            )
+        # Now safe to create index that references platform_id
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_history_account "
+            "ON sub_history(guild_id, discord_user_id, platform, platform_id)"
+        )
         await self._migrate()
 
     async def _migrate(self) -> None:

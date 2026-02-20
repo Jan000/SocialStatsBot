@@ -42,28 +42,34 @@ class AdminCog(commands.Cog, name="Admin"):
     @app_commands.command(name="link_youtube", description="Verknüpfe einen Discord-User mit einem YouTube-Kanal.")
     @app_commands.describe(
         user="Der Discord-User",
-        channel_id="Die YouTube-Channel-ID",
+        channel="YouTube-Kanal: URL (youtube.com/@Name), @Handle oder Channel-ID",
     )
     @admin_only()
     async def link_youtube(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        channel_id: str,
+        channel: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        # Validate channel
-        info = await self.bot.youtube.get_channel_info(channel_id)
+        # Resolve channel from URL, @handle, or ID
+        info = await self.bot.youtube.resolve_channel(channel)
         if info is None:
-            await interaction.followup.send("❌ YouTube-Kanal nicht gefunden.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ YouTube-Kanal nicht gefunden. Akzeptiert: URL (`youtube.com/@Name`), `@Handle` oder Channel-ID.",
+                ephemeral=True,
+            )
             return
+
+        # Use the resolved channel ID from API response
+        resolved_channel_id = info["id"]
 
         await self.bot.db.link_account(
             guild_id=interaction.guild.id,
             discord_user_id=user.id,
             platform="youtube",
-            platform_id=channel_id,
+            platform_id=resolved_channel_id,
             platform_name=info["title"],
         )
 

@@ -68,6 +68,10 @@ class RefreshCog(commands.Cog):
             for acc in accounts:
                 count = await self._fetch_count(platform, acc)
                 if count is None:
+                    log.warning(
+                        "API error for %s account %s (%s) in guild %s",
+                        platform, acc["platform_name"], acc["platform_id"], guild.id,
+                    )
                     await self.bot.db.set_account_status(
                         guild.id, acc["discord_user_id"], platform,
                         acc["platform_id"], "error"

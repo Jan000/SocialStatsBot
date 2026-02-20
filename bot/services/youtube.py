@@ -104,6 +104,7 @@ class YouTubeService:
                         return None
                     return int(stats.get("subscriberCount", 0))
         except Exception:
+            log.exception("YouTube API error for channel %s", channel_id)
             return None
 
     async def get_channel_info(self, channel_id: str) -> Optional[dict]:

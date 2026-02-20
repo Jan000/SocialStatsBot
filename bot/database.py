@@ -387,10 +387,15 @@ class Database:
     async def set_account_status(
         self, guild_id: int, discord_user_id: int, platform: str, platform_id: str, status: str
     ) -> None:
-        now = time.time()
+        """Update only the status flag without touching last_refreshed.
+
+        This keeps the account eligible for the next refresh cycle so
+        transient API errors are retried quickly instead of waiting
+        the full interval.
+        """
         await self.db.execute(
-            "UPDATE linked_accounts SET last_refreshed = ?, last_status = ? WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?",
-            (now, status, guild_id, discord_user_id, platform, platform_id),
+            "UPDATE linked_accounts SET last_status = ? WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?",
+            (status, guild_id, discord_user_id, platform, platform_id),
         )
         await self.db.commit()
 

@@ -1,0 +1,1 @@
+"""NirukiSocialStats Discord Bot package."""

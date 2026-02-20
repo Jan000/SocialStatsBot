@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      # Persist the SQLite database
+      - ./data:/app/data
+      # Mount config (must exist before starting)
+      - ./config.toml:/app/config.toml:ro

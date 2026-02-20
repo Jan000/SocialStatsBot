@@ -22,6 +22,7 @@ from bot.roles import (
     cleanup_unused_roles,
 )
 from bot.scoreboard import update_scoreboard
+from bot.pagination import PaginationView, paginate_lines
 
 log = logging.getLogger(__name__)
 
@@ -214,19 +215,35 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             )
             return
 
-        lines: list[str] = [f"**Accounts von {user.display_name}:**\n"]
+        lines: list[str] = []
         if yt_accounts:
             lines.append("📺 **YouTube:**")
             for acc in yt_accounts:
                 count = f"{acc['current_count']:,}".replace(",", ".")
                 lines.append(f"  • {acc['platform_name']} – {count} Abos")
         if tw_accounts:
+            if lines:
+                lines.append("")
             lines.append("🎮 **Twitch:**")
             for acc in tw_accounts:
                 count = f"{acc['current_count']:,}".replace(",", ".")
                 lines.append(f"  • {acc['platform_name']} – {count} Follower")
 
-        await interaction.followup.send("\n".join(lines), ephemeral=True)
+        chunks = paginate_lines(lines, per_page=15)
+        pages: list[discord.Embed] = []
+        for i, chunk in enumerate(chunks):
+            embed = discord.Embed(
+                title=f"Accounts von {user.display_name}",
+                description="\n".join(chunk),
+            )
+            embed.set_footer(text=f"Seite {i+1}/{len(chunks)}")
+            pages.append(embed)
+
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0], ephemeral=True)
+        else:
+            view = PaginationView(pages, author_id=interaction.user.id)
+            await interaction.followup.send(embed=pages[0], view=view, ephemeral=True)
 
     # ── /admin force_refresh ─────────────────────────────────────────
 
@@ -328,20 +345,35 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             return
 
         entries = await self.bot.db.get_history(
-            interaction.guild_id, user.id, platform.value, account["platform_id"], limit=20
+            interaction.guild_id, user.id, platform.value, account["platform_id"], limit=100
         )
         if not entries:
             await interaction.followup.send("Keine Historie vorhanden.", ephemeral=True)
             return
 
         label = "Abos" if platform.value == "youtube" else "Follower"
-        lines = [f"📊 **Historie für {account['platform_name']} ({platform.name}):**\n"]
+        lines: list[str] = []
         for e in entries:
             ts = datetime.fromtimestamp(e["recorded_at"], tz=timezone.utc)
             count_str = f"{e['count']:,}".replace(",", ".")
             lines.append(f"`{ts:%d.%m.%Y %H:%M}` – **{count_str}** {label}")
 
-        await interaction.followup.send("\n".join(lines), ephemeral=True)
+        chunks = paginate_lines(lines, per_page=15)
+        pages: list[discord.Embed] = []
+        for i, chunk in enumerate(chunks):
+            embed = discord.Embed(
+                title=f"📊 Historie – {account['platform_name']} ({platform.name})",
+                description="\n".join(chunk),
+                colour=discord.Colour(0xFF0000) if platform.value == "youtube" else discord.Colour(0x6441A4),
+            )
+            embed.set_footer(text=f"Seite {i+1}/{len(chunks)} • {len(entries)} Einträge")
+            pages.append(embed)
+
+        if len(pages) == 1:
+            await interaction.followup.send(embed=pages[0], ephemeral=True)
+        else:
+            view = PaginationView(pages, author_id=interaction.user.id)
+            await interaction.followup.send(embed=pages[0], view=view, ephemeral=True)
 
     # ── Helpers ──────────────────────────────────────────────────────
 

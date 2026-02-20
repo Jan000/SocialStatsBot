@@ -2,6 +2,10 @@
 
 [bot]
 token = "YOUR_DISCORD_BOT_TOKEN"
+# Optional: set a guild ID for instant slash command sync during development
+# dev_guild_id = 123456789012345678
+# Optional: enable Twitch EventSub WebSocket for real-time channel update notifications
+# enable_eventsub = true
 
 [api_keys]
 youtube_api_key = "YOUR_YOUTUBE_DATA_API_V3_KEY"

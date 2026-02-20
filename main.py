@@ -31,6 +31,8 @@ def main() -> None:
         config = tomllib.load(f)
 
     bot_token = config["bot"]["token"]
+    dev_guild_id = config.get("bot", {}).get("dev_guild_id")
+    enable_eventsub = config.get("bot", {}).get("enable_eventsub", False)
     yt_key = config["api_keys"]["youtube_api_key"]
     tw_id = config["api_keys"]["twitch_client_id"]
     tw_secret = config["api_keys"]["twitch_client_secret"]
@@ -39,6 +41,8 @@ def main() -> None:
         youtube_api_key=yt_key,
         twitch_client_id=tw_id,
         twitch_client_secret=tw_secret,
+        dev_guild_id=dev_guild_id,
+        enable_eventsub=enable_eventsub,
     )
     bot.run(bot_token, log_handler=None)
 

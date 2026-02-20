@@ -25,6 +25,7 @@ class RefreshCog(commands.Cog):
 
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
+        self._eventsub_bootstrapped = False
 
     async def cog_load(self) -> None:
         self.refresh_loop.start()
@@ -35,6 +36,11 @@ class RefreshCog(commands.Cog):
     @tasks.loop(seconds=30)
     async def refresh_loop(self) -> None:
         """Check all guilds for accounts that are due a refresh."""
+        # On first iteration subscribe existing Twitch accounts to EventSub
+        if not self._eventsub_bootstrapped and self.bot.eventsub:
+            self._eventsub_bootstrapped = True
+            await self._bootstrap_eventsub()
+
         for guild in self.bot.guilds:
             try:
                 await self._refresh_guild(guild)
@@ -94,6 +100,18 @@ class RefreshCog(commands.Cog):
             return await self.bot.youtube.get_subscriber_count(account["platform_id"])
         else:
             return await self.bot.twitch.get_follower_count(account["platform_id"])
+
+    async def _bootstrap_eventsub(self) -> None:
+        """Subscribe all existing Twitch accounts to EventSub on startup."""
+        seen: set[str] = set()
+        for guild in self.bot.guilds:
+            accounts = await self.bot.db.get_all_linked(guild.id, "twitch")
+            for acc in accounts:
+                pid = acc["platform_id"]
+                if pid not in seen:
+                    seen.add(pid)
+                    await self.bot.eventsub.subscribe(pid)  # type: ignore[union-attr]
+        log.info("EventSub bootstrap: subscribed %d Twitch broadcaster(s).", len(seen))
 
 
 async def setup(bot: SocialStatsBot) -> None:

@@ -1,19 +1,21 @@
 # Projektstatus – NirukiSocialStats Discord Bot
 
 **Stand:** 2026-02-20  
-**Phase:** Major Refactor v2 abgeschlossen
+**Phase:** Feature-Complete
 
 ---
 
 ## Erledigte Aufgaben
 
 ### Projektstruktur & Konfiguration
-- [x] Projektstruktur angelegt (`bot/`, `bot/cogs/`, `bot/services/`, `docs/`)
+- [x] Projektstruktur angelegt (`bot/`, `bot/cogs/`, `bot/services/`, `docs/`, `tests/`)
 - [x] `config.toml` und `config.toml.example` erstellt
-- [x] `requirements.txt` mit allen Dependencies
+- [x] `requirements.txt` mit allen Dependencies (inkl. pytest)
 - [x] `.gitignore` konfiguriert (schützt `config.toml`, `*.db`, `__pycache__`)
 - [x] `README.md` mit vollständiger Dokumentation
 - [x] `copilot-instructions.md` für Copilot-Kontext
+- [x] **Docker-Support** – `Dockerfile`, `docker-compose.yml`, `.dockerignore`
+- [x] **pytest.ini** – Konfiguration für async Tests
 
 ### Datenbank (SQLite via aiosqlite)
 - [x] Schema definiert: `guild_settings`, `linked_accounts`, `sub_history`, `role_designs`, `scoreboard_messages`
@@ -29,20 +31,28 @@
 - [x] **YouTube URL-Parsing** – Akzeptiert URLs, @Handles und Channel-IDs
 - [x] **Twitch Helix API** – Follower-Count, User-Lookup, OAuth Token Management
 - [x] **Twitch URL-Parsing** – Akzeptiert URLs und Login-Namen
+- [x] **Rate-Limit-Management** – Token-Bucket Rate-Limiter (`bot/ratelimit.py`) in beiden Services
+- [x] **Twitch EventSub** – Optionale WebSocket-Integration für Echtzeit-Channel-Updates (`bot/services/eventsub.py`)
 
 ### Bot-Kern
 - [x] `SocialStatsBot`-Klasse mit Config-Loading, DB, YouTube- & Twitch-Service
 - [x] **Kein eigenes Permission-System** – Discord `default_permissions(administrator=True)` steuert Zugriff
 - [x] Strukturiertes Logging über Python `logging`-Modul
 - [x] `main.py` Entry Point mit Logging-Setup
+- [x] **Guild-spezifischer Slash-Command-Sync** – Optional `dev_guild_id` für sofortige Sync
+- [x] **Optional Twitch EventSub** – `enable_eventsub` in config.toml aktivierbar
 
 ### Admin-Commands (Cog: `admin.py`, Gruppe `/admin`)
 - [x] `/admin link_youtube` – YT-Channel verknüpfen (URL/@Handle/ID) + sofortiger Count-Fetch + Rolle
 - [x] `/admin link_twitch` – Twitch-Account verknüpfen (URL/Login) + sofortiger Count-Fetch + Rolle
 - [x] `/admin unlink` – Einen bestimmten Account entfernen (nach Account-Name)
-- [x] `/admin accounts` – Alle verknüpften Accounts eines Users anzeigen
+- [x] `/admin accounts` – Alle verknüpften Accounts eines Users anzeigen (paginiert)
 - [x] `/admin force_refresh` – Sofortiger Refresh aller Accounts (optional nach Plattform)
-- [x] `/admin history` – Abo-/Follower-Verlauf für einen bestimmten Account
+- [x] `/admin history` – Abo-/Follower-Verlauf für einen bestimmten Account (paginiert, bis 100 Einträge)
+
+### Statistik-Commands (Cog: `stats.py`, Gruppe `/stats`)
+- [x] `/stats growth` – Wachstum eines Accounts über 7/30/90 Tage mit Differenz und Prozent
+- [x] `/stats overview` – Übersicht aller Accounts einer Plattform mit Wachstumsdaten
 
 ### Einstellungs-Commands (Cog: `settings.py`, Gruppe `/settings`)
 - [x] `/settings show` – Alle Einstellungen anzeigen
@@ -76,6 +86,17 @@
 - [x] Respektiert konfiguriertes Refresh-Intervall pro Plattform
 - [x] Automatische Rollen- und Scoreboard-Aktualisierung nach Refresh
 - [x] Fehler-Status-Tracking bei fehlgeschlagenen API-Calls
+- [x] EventSub-Bootstrap: Subscribed bestehende Twitch-Accounts bei Start
+
+### Pagination (`pagination.py`)
+- [x] Wiederverwendbare `PaginationView` mit ◀/▶ Buttons
+- [x] `paginate_lines()` Hilfsfunktion für einfache Text-Listen
+- [x] Integriert in `/admin history` und `/admin accounts`
+
+### Testing (`tests/`)
+- [x] 31 Unit-Tests (pytest + pytest-asyncio)
+- [x] `test_database.py` – Guild-Settings, Account-CRUD, History-Deduplizierung, Role-Designs, Scoreboards
+- [x] `test_roles.py` – format_count, build_role_name, compute_role_name_and_color
 
 ### Error Handling
 - [x] `cog_app_command_error` Handler in Admin- und Settings-Cog
@@ -95,4 +116,8 @@
 | History-Deduplizierung | Reduziert DB-Größe bei gleichbleibendem Count |
 | Rollen mit `{name}` Placeholder | Jeder Account bekommt eigene, erkennbare Rolle |
 | Alle anderen Settings in DB | Per Discord-Command editierbar wie gefordert |
-| Rollen-Prefix `[YT]`/`[TW]` | Sicheres Identifizieren bot-verwalteter Rollen |
+| Rollen-Prefix `[YouTube]`/`[Twitch]` | Sicheres Identifizieren bot-verwalteter Rollen |
+| Token-Bucket Rate-Limiting | Respektiert API-Quotas, konfigurierbare Burst-Limits |
+| EventSub WebSocket (optional) | Echtzeit-Updates ohne öffentliche URL, `enable_eventsub` in config |
+| Docker-Support | Einfaches Deployment mit `docker compose up` |
+| Guild-Sync Option | `dev_guild_id` für sofortige Command-Updates bei Entwicklung |

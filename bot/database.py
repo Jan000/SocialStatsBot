@@ -376,6 +376,17 @@ class Database:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def get_history_since(
+        self, guild_id: int, discord_user_id: int, platform: str, platform_id: str, since: float
+    ) -> list[dict]:
+        """Get history entries since a given timestamp (DESC order)."""
+        async with self.db.execute(
+            "SELECT * FROM sub_history WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ? AND recorded_at >= ? ORDER BY recorded_at DESC",
+            (guild_id, discord_user_id, platform, platform_id, since),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     # ── Role designs ─────────────────────────────────────────────────
 
     async def set_role_design(

@@ -9,10 +9,17 @@ import logging
 import aiohttp
 from typing import Optional
 
+from bot.ratelimit import RateLimiter
+
 log = logging.getLogger(__name__)
 
 TWITCH_HELIX = "https://api.twitch.tv/helix"
 TWITCH_OAUTH = "https://id.twitch.tv/oauth2/token"
+
+# Twitch Helix rate limit: 800 req / 60s for app access tokens.
+# We stay well below with 20 req/s burst.
+_DEFAULT_TW_MAX_CALLS = 20
+_DEFAULT_TW_PERIOD = 1.0
 
 # Patterns for parsing Twitch input
 _TW_URL_RE = re.compile(
@@ -42,11 +49,12 @@ def parse_twitch_input(value: str) -> str:
 class TwitchService:
     """Fetches Twitch follower counts using Helix API with Client Credentials."""
 
-    def __init__(self, client_id: str, client_secret: str) -> None:
+    def __init__(self, client_id: str, client_secret: str, *, max_calls: int = _DEFAULT_TW_MAX_CALLS, period: float = _DEFAULT_TW_PERIOD) -> None:
         self.client_id = client_id
         self.client_secret = client_secret
         self._session: Optional[aiohttp.ClientSession] = None
         self._access_token: Optional[str] = None
+        self._rate_limiter = RateLimiter(max_calls, period)
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -93,22 +101,23 @@ class TwitchService:
             return None
         session = await self._get_session()
         try:
-            async with session.get(
-                f"{TWITCH_HELIX}/{endpoint}", headers=self._headers(), params=params
-            ) as resp:
-                if resp.status == 401:
-                    self._access_token = None
-                    if not await self._ensure_token():
-                        return None
-                    async with session.get(
-                        f"{TWITCH_HELIX}/{endpoint}", headers=self._headers(), params=params
-                    ) as resp2:
-                        if resp2.status != 200:
+            async with self._rate_limiter:
+                async with session.get(
+                    f"{TWITCH_HELIX}/{endpoint}", headers=self._headers(), params=params
+                ) as resp:
+                    if resp.status == 401:
+                        self._access_token = None
+                        if not await self._ensure_token():
                             return None
-                        return await resp2.json()
-                if resp.status != 200:
-                    return None
-                return await resp.json()
+                        async with session.get(
+                            f"{TWITCH_HELIX}/{endpoint}", headers=self._headers(), params=params
+                        ) as resp2:
+                            if resp2.status != 200:
+                                return None
+                            return await resp2.json()
+                    if resp.status != 200:
+                        return None
+                    return await resp.json()
         except Exception as e:
             log.error("Twitch Helix error (%s): %s", endpoint, e)
             return None

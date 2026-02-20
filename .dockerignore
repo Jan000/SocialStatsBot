@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+config.toml
+data/*.db
+.git/
+.github/
+docs/
+*.md

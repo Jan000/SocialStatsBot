@@ -9,26 +9,37 @@ Discord-Bot in Python, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt,
 - **Python 3.11+**
 - **discord.py 2.x** mit Slash-Commands (`app_commands`)
 - **aiosqlite** für async SQLite-Zugriff
-- **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API)
+- **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket)
 - **tomllib** (stdlib) für die Konfigurationsdatei
+- **pytest** + **pytest-asyncio** für Unit-Tests
 
 ## Projektstruktur
 
 ```
 main.py                    # Entry Point
 config.toml                # Bot-Token + API-Keys (nicht im Git)
+pytest.ini                 # pytest-Konfiguration
+Dockerfile                 # Docker-Image (python:3.11-slim)
+docker-compose.yml         # Docker-Compose für einfaches Deployment
 bot/
 ├── bot.py                 # SocialStatsBot(commands.Bot) – Haupt-Bot-Klasse
 ├── database.py            # Database-Klasse – async SQLite Wrapper
 ├── roles.py               # Rollen-Erstellung, -Zuweisung, -Cleanup
 ├── scoreboard.py          # Scoreboard-Embed-Erstellung & Message-Update
+├── pagination.py          # PaginationView – Discord-Buttons für Seiten-Navigation
+├── ratelimit.py           # Token-Bucket Rate-Limiter für API-Requests
 ├── cogs/
 │   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
 │   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings)
-│   └── refresh.py         # Background-Tasks (periodischer Count-Refresh)
+│   ├── stats.py           # Statistik-Commands (growth/overview)
+│   └── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap)
 └── services/
-    ├── youtube.py          # YouTubeService – YouTube Data API v3
-    └── twitch.py           # TwitchService – Twitch Helix API + OAuth
+    ├── youtube.py          # YouTubeService – YouTube Data API v3 (rate-limited)
+    ├── twitch.py           # TwitchService – Twitch Helix API + OAuth (rate-limited)
+    └── eventsub.py         # TwitchEventSub – WebSocket-Client für Echtzeit-Events
+tests/
+├── test_database.py       # 20 Tests für Database-Layer
+└── test_roles.py          # 11 Tests für Role-Logic
 data/
 └── bot.db                 # SQLite-Datenbank (auto-generiert)
 docs/
@@ -74,9 +85,12 @@ docs/
 - Beide akzeptieren URLs, Handles und IDs als Input (`parse_youtube_input`, `parse_twitch_input`)
 - Twitch nutzt Client-Credentials OAuth (App Access Token)
 - Methoden returnen `None` bei Fehlern (kein Exception-Raising)
+- **Rate-Limiting**: Beide Services nutzen `RateLimiter` (Token-Bucket) aus `bot/ratelimit.py`
+- **Twitch EventSub**: Optionaler WebSocket-Client (`bot/services/eventsub.py`) für Echtzeit-Channel-Updates
 
 ### Konfiguration
 - `config.toml`: NUR Bot-Token und API-Keys (nicht per Command änderbar)
+- Optionale Keys: `dev_guild_id` (Entwicklungs-Sync), `enable_eventsub` (Echtzeit-Updates)
 - Alle anderen Einstellungen in `guild_settings`-Tabelle (per Slash-Command editierbar)
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
 

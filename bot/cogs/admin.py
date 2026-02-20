@@ -1,11 +1,13 @@
 """
-Admin cog – account linking/unlinking and status commands.
-Only the admin user (from config.toml) can use these.
+Admin cog – link/unlink accounts, force refresh, view history.
+
+All commands restricted to server administrators via Discord's
+built-in permission system (default_permissions).
 """
 
 from __future__ import annotations
 
-import time
+import logging
 from datetime import datetime, timezone
 
 import discord
@@ -13,403 +15,379 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.bot import SocialStatsBot
-from bot.roles import compute_role_name_and_color, update_member_role, cleanup_unused_roles
+from bot.roles import (
+    compute_role_name_and_color,
+    update_member_role,
+    remove_account_roles,
+    cleanup_unused_roles,
+)
+from bot.scoreboard import update_scoreboard
+
+log = logging.getLogger(__name__)
 
 
-def admin_only():
-    """Decorator: restrict to the configured admin user."""
-
-    async def predicate(interaction: discord.Interaction) -> bool:
-        bot: SocialStatsBot = interaction.client  # type: ignore
-        if not bot.is_admin(interaction.user.id):
-            await interaction.response.send_message(
-                "❌ Nur der Bot-Admin darf diesen Befehl verwenden.", ephemeral=True
-            )
-            return False
-        return True
-
-    return app_commands.check(predicate)
-
-
-class AdminCog(commands.Cog, name="Admin"):
-    """Admin-only commands for managing linked accounts."""
+@app_commands.default_permissions(administrator=True)
+class AdminCog(commands.GroupCog, group_name="admin"):
+    """Admin commands for managing linked accounts."""
 
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
 
-    async def cog_app_command_error(
-        self, interaction: discord.Interaction, error: app_commands.AppCommandError
-    ) -> None:
-        """Handle errors for all commands in this cog."""
-        original = getattr(error, "original", error)
+    # ── /admin link_youtube ──────────────────────────────────────────
 
-        if isinstance(original, discord.Forbidden):
-            msg = (
-                "❌ **Fehlende Berechtigungen!** Der Bot braucht die Berechtigung "
-                "**\"Rollen verwalten\"** und seine Rolle muss in der Hierarchie "
-                "über den zu verwaltenden Rollen stehen."
-            )
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
-            return
-
-        # Re-raise unhandled errors
-        raise error
-
-    # ── Link YouTube ─────────────────────────────────────────────────
-
-    @app_commands.command(name="link_youtube", description="Verknüpfe einen Discord-User mit einem YouTube-Kanal.")
-    @app_commands.describe(
-        user="Der Discord-User",
-        channel="YouTube-Kanal: URL (youtube.com/@Name), @Handle oder Channel-ID",
+    @app_commands.command(
+        name="link_youtube",
+        description="Verknüpft einen YouTube-Kanal mit einem Discord-User.",
     )
-    @admin_only()
+    @app_commands.describe(
+        user="Discord-User",
+        channel_input="YouTube-Kanal (URL, @Handle oder Channel-ID)",
+    )
     async def link_youtube(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        channel: str,
+        channel_input: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        # Resolve channel from URL, @handle, or ID
-        info = await self.bot.youtube.resolve_channel(channel)
+        info = await self.bot.youtube.resolve_channel(channel_input)
         if info is None:
             await interaction.followup.send(
-                "❌ YouTube-Kanal nicht gefunden. Akzeptiert: URL (`youtube.com/@Name`), `@Handle` oder Channel-ID.",
+                "❌ Konnte den YouTube-Kanal nicht finden. Prüfe die Eingabe.",
                 ephemeral=True,
             )
             return
 
-        # Use the resolved channel ID from API response
-        resolved_channel_id = info["id"]
+        channel_id = info["id"]
+        channel_name = info["title"]
+        sub_count = info["subscriber_count"]
 
         await self.bot.db.link_account(
-            guild_id=interaction.guild.id,
-            discord_user_id=user.id,
-            platform="youtube",
-            platform_id=resolved_channel_id,
-            platform_name=info["title"],
+            interaction.guild_id, user.id, "youtube", channel_id, channel_name
         )
-
-        # Immediately fetch count
-        count = info.get("subscriber_count", 0)
         await self.bot.db.update_account_count(
-            interaction.guild.id, user.id, "youtube", count, "ok"
+            interaction.guild_id, user.id, "youtube", channel_id, sub_count
         )
 
         # Assign role
-        settings = await self.bot.db.get_guild_settings(interaction.guild.id)
+        settings = await self.bot.db.get_guild_settings(interaction.guild_id)
         role_name, role_color = await compute_role_name_and_color(
-            self.bot.db, interaction.guild.id, "youtube", count, settings
+            self.bot.db, interaction.guild_id, "youtube", sub_count, settings, channel_name
         )
-        await update_member_role(interaction.guild, user, "youtube", role_name, role_color)
-        await cleanup_unused_roles(interaction.guild, "youtube")
+        await update_member_role(
+            interaction.guild, user, "youtube", channel_name, role_name, role_color
+        )
 
         await interaction.followup.send(
-            f"✅ **{user.display_name}** ↔ YouTube **{info['title']}** ({count:,} Abos) verknüpft.",
+            f"✅ **{channel_name}** (YouTube) mit {user.mention} verknüpft.\n"
+            f"Aktuelle Abos: **{sub_count:,}**".replace(",", "."),
             ephemeral=True,
         )
 
-    # ── Link Twitch ──────────────────────────────────────────────────
+    # ── /admin link_twitch ───────────────────────────────────────────
 
-    @app_commands.command(name="link_twitch", description="Verknüpfe einen Discord-User mit einem Twitch-Account.")
-    @app_commands.describe(
-        user="Der Discord-User",
-        twitch_login="Der Twitch-Loginname",
+    @app_commands.command(
+        name="link_twitch",
+        description="Verknüpft einen Twitch-Kanal mit einem Discord-User.",
     )
-    @admin_only()
+    @app_commands.describe(
+        user="Discord-User",
+        channel_input="Twitch-Kanal (URL oder Login-Name)",
+    )
     async def link_twitch(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        twitch_login: str,
+        channel_input: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        tw_user = await self.bot.twitch.get_user(twitch_login)
-        if tw_user is None:
-            await interaction.followup.send("❌ Twitch-User nicht gefunden.", ephemeral=True)
+        info = await self.bot.twitch.get_channel_info(channel_input)
+        if info is None:
+            await interaction.followup.send(
+                "❌ Konnte den Twitch-Kanal nicht finden. Prüfe die Eingabe.",
+                ephemeral=True,
+            )
             return
 
-        broadcaster_id = tw_user["id"]
-        display_name = tw_user.get("display_name", twitch_login)
+        twitch_id = info["id"]
+        display_name = info["display_name"]
+        follower_count = info["follower_count"]
 
         await self.bot.db.link_account(
-            guild_id=interaction.guild.id,
-            discord_user_id=user.id,
-            platform="twitch",
-            platform_id=broadcaster_id,
-            platform_name=display_name,
+            interaction.guild_id, user.id, "twitch", twitch_id, display_name
         )
-
-        count = await self.bot.twitch.get_follower_count(broadcaster_id) or 0
         await self.bot.db.update_account_count(
-            interaction.guild.id, user.id, "twitch", count, "ok"
+            interaction.guild_id, user.id, "twitch", twitch_id, follower_count
         )
 
-        settings = await self.bot.db.get_guild_settings(interaction.guild.id)
+        settings = await self.bot.db.get_guild_settings(interaction.guild_id)
         role_name, role_color = await compute_role_name_and_color(
-            self.bot.db, interaction.guild.id, "twitch", count, settings
+            self.bot.db, interaction.guild_id, "twitch", follower_count, settings, display_name
         )
-        await update_member_role(interaction.guild, user, "twitch", role_name, role_color)
-        await cleanup_unused_roles(interaction.guild, "twitch")
+        await update_member_role(
+            interaction.guild, user, "twitch", display_name, role_name, role_color
+        )
 
         await interaction.followup.send(
-            f"✅ **{user.display_name}** ↔ Twitch **{display_name}** ({count:,} Follower) verknüpft.",
+            f"✅ **{display_name}** (Twitch) mit {user.mention} verknüpft.\n"
+            f"Aktuelle Follower: **{follower_count:,}**".replace(",", "."),
             ephemeral=True,
         )
 
-    # ── Unlink ───────────────────────────────────────────────────────
+    # ── /admin unlink ────────────────────────────────────────────────
 
-    @app_commands.command(name="unlink", description="Entferne die Verknüpfung eines Users mit YouTube oder Twitch.")
-    @app_commands.describe(
-        user="Der Discord-User",
-        platform="youtube oder twitch",
+    @app_commands.command(
+        name="unlink",
+        description="Entfernt die Verknüpfung eines Accounts von einem Discord-User.",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
+    @app_commands.describe(
+        user="Discord-User",
+        platform="Plattform",
+        account_name="Name des Accounts (z.B. Niruki)",
+    )
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
     async def unlink(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
         platform: app_commands.Choice[str],
+        account_name: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        removed = await self.bot.db.unlink_account(
-            interaction.guild.id, user.id, platform.value
+
+        account = await self.bot.db.find_linked_account_by_name(
+            interaction.guild_id, user.id, platform.value, account_name
         )
-        if not removed:
+        if account is None:
             await interaction.followup.send(
-                f"❌ Keine {platform.name}-Verknüpfung für **{user.display_name}** gefunden.",
+                f"❌ Kein {platform.name}-Account mit dem Namen **{account_name}** "
+                f"für {user.mention} gefunden.",
                 ephemeral=True,
             )
             return
 
-        # Remove platform roles
-        prefix = "[YT] " if platform.value == "youtube" else "[TW] "
-        roles_to_remove = [r for r in user.roles if r.name.startswith(prefix)]
-        if roles_to_remove:
-            await user.remove_roles(*roles_to_remove, reason="NirukiSocialStats – unlink")
+        platform_name = account["platform_name"]
+        await self.bot.db.unlink_account(
+            interaction.guild_id, user.id, platform.value, account["platform_id"]
+        )
+
+        # Remove account-specific roles
+        await remove_account_roles(interaction.guild, user, platform.value, platform_name)
         await cleanup_unused_roles(interaction.guild, platform.value)
 
         await interaction.followup.send(
-            f"✅ {platform.name}-Verknüpfung für **{user.display_name}** entfernt.",
+            f"✅ **{platform_name}** ({platform.name}) von {user.mention} entfernt.",
             ephemeral=True,
         )
 
-    # ── List linked accounts ─────────────────────────────────────────
+    # ── /admin accounts ──────────────────────────────────────────────
 
-    @app_commands.command(name="list_accounts", description="Zeige alle verknüpften Accounts auf diesem Server.")
-    @app_commands.describe(platform="youtube oder twitch")
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def list_accounts(
-        self,
-        interaction: discord.Interaction,
-        platform: app_commands.Choice[str],
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        accounts = await self.bot.db.get_all_linked(interaction.guild.id, platform.value)
-        if not accounts:
-            await interaction.followup.send(
-                f"Keine {platform.name}-Accounts verknüpft.", ephemeral=True
-            )
-            return
-
-        lines: list[str] = []
-        for acc in accounts:
-            member = interaction.guild.get_member(acc["discord_user_id"])
-            name = member.display_name if member else f"User {acc['discord_user_id']}"
-            pname = acc.get("platform_name") or acc["platform_id"]
-            count = acc["current_count"]
-            lines.append(f"• **{name}** → {pname} ({count:,})")
-
-        embed = discord.Embed(
-            title=f"Verknüpfte {platform.name}-Accounts",
-            description="\n".join(lines),
-            color=0xFF0000 if platform.value == "youtube" else 0x6441A4,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    # ── Refresh status ───────────────────────────────────────────────
-
-    @app_commands.command(name="refresh_status", description="Zeige den Refresh-Status aller verknüpften Accounts.")
-    @app_commands.describe(platform="youtube oder twitch")
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def refresh_status(
-        self,
-        interaction: discord.Interaction,
-        platform: app_commands.Choice[str],
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        settings = await self.bot.db.get_guild_settings(interaction.guild.id)
-        interval_key = "yt_refresh_interval" if platform.value == "youtube" else "tw_refresh_interval"
-        interval = settings.get(interval_key, 600)
-
-        accounts = await self.bot.db.get_all_linked(interaction.guild.id, platform.value)
-        if not accounts:
-            await interaction.followup.send(
-                f"Keine {platform.name}-Accounts verknüpft.", ephemeral=True
-            )
-            return
-
-        lines: list[str] = []
-        now = time.time()
-        for acc in accounts:
-            member = interaction.guild.get_member(acc["discord_user_id"])
-            name = member.display_name if member else f"User {acc['discord_user_id']}"
-            last = acc["last_refreshed"]
-            status = acc["last_status"]
-
-            if last > 0:
-                last_dt = datetime.fromtimestamp(last, tz=timezone.utc)
-                last_str = discord.utils.format_dt(last_dt, style="R")
-                next_refresh = last + interval
-                if next_refresh > now:
-                    next_dt = datetime.fromtimestamp(next_refresh, tz=timezone.utc)
-                    next_str = discord.utils.format_dt(next_dt, style="R")
-                else:
-                    next_str = "**jetzt fällig**"
-            else:
-                last_str = "nie"
-                next_str = "**jetzt fällig**"
-
-            emoji = "✅" if status == "ok" else "⏳" if status == "pending" else "❌"
-            lines.append(
-                f"{emoji} **{name}** – Letzter Refresh: {last_str} | Nächster: {next_str} | Status: `{status}`"
-            )
-
-        embed = discord.Embed(
-            title=f"{platform.name} Refresh-Status",
-            description="\n".join(lines),
-            color=0xFF0000 if platform.value == "youtube" else 0x6441A4,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    # ── Manual refresh ───────────────────────────────────────────────
-
-    @app_commands.command(name="force_refresh", description="Erzwinge einen sofortigen Refresh für einen User.")
-    @app_commands.describe(
-        user="Der Discord-User",
-        platform="youtube oder twitch",
+    @app_commands.command(
+        name="accounts",
+        description="Zeigt alle verknüpften Accounts eines Users.",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def force_refresh(
+    @app_commands.describe(user="Discord-User")
+    async def accounts(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        platform: app_commands.Choice[str],
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        acc = await self.bot.db.get_linked_account(
-            interaction.guild.id, user.id, platform.value
+
+        yt_accounts = await self.bot.db.get_linked_accounts_for_user(
+            interaction.guild_id, user.id, "youtube"
         )
-        if acc is None:
+        tw_accounts = await self.bot.db.get_linked_accounts_for_user(
+            interaction.guild_id, user.id, "twitch"
+        )
+
+        if not yt_accounts and not tw_accounts:
             await interaction.followup.send(
-                f"❌ Keine {platform.name}-Verknüpfung für **{user.display_name}** gefunden.",
-                ephemeral=True,
+                f"Keine Accounts für {user.mention} verknüpft.", ephemeral=True
             )
             return
 
-        # Fetch new count
-        if platform.value == "youtube":
-            count = await self.bot.youtube.get_subscriber_count(acc["platform_id"])
-        else:
-            count = await self.bot.twitch.get_follower_count(acc["platform_id"])
+        lines: list[str] = [f"**Accounts von {user.display_name}:**\n"]
+        if yt_accounts:
+            lines.append("📺 **YouTube:**")
+            for acc in yt_accounts:
+                count = f"{acc['current_count']:,}".replace(",", ".")
+                lines.append(f"  • {acc['platform_name']} – {count} Abos")
+        if tw_accounts:
+            lines.append("🎮 **Twitch:**")
+            for acc in tw_accounts:
+                count = f"{acc['current_count']:,}".replace(",", ".")
+                lines.append(f"  • {acc['platform_name']} – {count} Follower")
 
-        if count is None:
-            await self.bot.db.set_account_status(
-                interaction.guild.id, user.id, platform.value, "error"
-            )
-            await interaction.followup.send(
-                f"❌ Konnte {platform.name}-Daten nicht abrufen.", ephemeral=True
-            )
-            return
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
-        old_count = acc["current_count"]
-        await self.bot.db.update_account_count(
-            interaction.guild.id, user.id, platform.value, count, "ok"
-        )
+    # ── /admin force_refresh ─────────────────────────────────────────
 
-        # Update role
-        settings = await self.bot.db.get_guild_settings(interaction.guild.id)
-        role_name, role_color = await compute_role_name_and_color(
-            self.bot.db, interaction.guild.id, platform.value, count, settings
-        )
-        await update_member_role(interaction.guild, user, platform.value, role_name, role_color)
-        await cleanup_unused_roles(interaction.guild, platform.value)
+    @app_commands.command(
+        name="force_refresh",
+        description="Erzwingt eine sofortige Aktualisierung aller Accounts.",
+    )
+    @app_commands.describe(
+        platform="Plattform (optional, sonst beide)",
+    )
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def force_refresh(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str] = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
 
-        diff = count - old_count
-        diff_str = f"+{diff}" if diff >= 0 else str(diff)
+        platforms = [platform.value] if platform else ["youtube", "twitch"]
+        total_updated = 0
+
+        for plat in platforms:
+            accounts = await self.bot.db.get_all_linked(interaction.guild_id, plat)
+            settings = await self.bot.db.get_guild_settings(interaction.guild_id)
+
+            for acc in accounts:
+                count = await self._fetch_count(plat, acc)
+                if count is None:
+                    await self.bot.db.set_account_status(
+                        interaction.guild_id, acc["discord_user_id"], plat,
+                        acc["platform_id"], "error"
+                    )
+                    continue
+
+                await self.bot.db.update_account_count(
+                    interaction.guild_id, acc["discord_user_id"], plat,
+                    acc["platform_id"], count
+                )
+                total_updated += 1
+
+                member = interaction.guild.get_member(acc["discord_user_id"])
+                if member:
+                    role_name, role_color = await compute_role_name_and_color(
+                        self.bot.db, interaction.guild_id, plat, count,
+                        settings, acc["platform_name"]
+                    )
+                    await update_member_role(
+                        interaction.guild, member, plat,
+                        acc["platform_name"], role_name, role_color
+                    )
+
+            await cleanup_unused_roles(interaction.guild, plat)
+            await update_scoreboard(self.bot, interaction.guild, plat, settings)
+
         await interaction.followup.send(
-            f"✅ **{user.display_name}** {platform.name}: {old_count:,} → {count:,} ({diff_str})",
+            f"✅ Refresh abgeschlossen. **{total_updated}** Account(s) aktualisiert.",
             ephemeral=True,
         )
 
-    # ── Account history ──────────────────────────────────────────────
+    # ── /admin history ───────────────────────────────────────────────
 
-    @app_commands.command(name="history", description="Zeige die letzten Änderungen für einen verknüpften Account.")
-    @app_commands.describe(
-        user="Der Discord-User",
-        platform="youtube oder twitch",
-        limit="Anzahl Einträge (Standard: 20)",
+    @app_commands.command(
+        name="history",
+        description="Zeigt die Zähler-Historie eines Accounts.",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
+    @app_commands.describe(
+        user="Discord-User",
+        platform="Plattform",
+        account_name="Account-Name",
+    )
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
     async def history(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
         platform: app_commands.Choice[str],
-        limit: int = 20,
+        account_name: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        records = await self.bot.db.get_history(
-            interaction.guild.id, user.id, platform.value, limit
+
+        account = await self.bot.db.find_linked_account_by_name(
+            interaction.guild_id, user.id, platform.value, account_name
         )
-        if not records:
+        if account is None:
+            await interaction.followup.send(
+                f"❌ Kein {platform.name}-Account **{account_name}** für {user.mention} gefunden.",
+                ephemeral=True,
+            )
+            return
+
+        entries = await self.bot.db.get_history(
+            interaction.guild_id, user.id, platform.value, account["platform_id"], limit=20
+        )
+        if not entries:
             await interaction.followup.send("Keine Historie vorhanden.", ephemeral=True)
             return
 
-        lines: list[str] = []
-        for i, rec in enumerate(records):
-            dt = datetime.fromtimestamp(rec["recorded_at"], tz=timezone.utc)
-            ts = discord.utils.format_dt(dt, style="f")
-            count = rec["count"]
-            if i + 1 < len(records):
-                prev = records[i + 1]["count"]
-                diff = count - prev
-                diff_str = f" ({'+' if diff >= 0 else ''}{diff})"
-            else:
-                diff_str = ""
-            lines.append(f"{ts} – **{count:,}**{diff_str}")
+        label = "Abos" if platform.value == "youtube" else "Follower"
+        lines = [f"📊 **Historie für {account['platform_name']} ({platform.name}):**\n"]
+        for e in entries:
+            ts = datetime.fromtimestamp(e["recorded_at"], tz=timezone.utc)
+            count_str = f"{e['count']:,}".replace(",", ".")
+            lines.append(f"`{ts:%d.%m.%Y %H:%M}` – **{count_str}** {label}")
 
-        embed = discord.Embed(
-            title=f"{platform.name}-Historie für {user.display_name}",
-            description="\n".join(lines),
-            color=0xFF0000 if platform.value == "youtube" else 0x6441A4,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    # ── Helpers ──────────────────────────────────────────────────────
+
+    async def _fetch_count(self, platform: str, account: dict) -> int | None:
+        """Fetch the current count for an account."""
+        if platform == "youtube":
+            return await self.bot.youtube.get_subscriber_count(account["platform_id"])
+        else:
+            return await self.bot.twitch.get_follower_count(account["platform_id"])
+
+    # ── Error handler ────────────────────────────────────────────────
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        if isinstance(error, app_commands.MissingPermissions) or isinstance(
+            error, app_commands.CheckFailure
+        ):
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Du hast keine Berechtigung für diesen Befehl.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    "❌ Du hast keine Berechtigung für diesen Befehl.",
+                    ephemeral=True,
+                )
+        elif isinstance(error, app_commands.CommandInvokeError) and isinstance(
+            error.original, discord.Forbidden
+        ):
+            msg = (
+                "❌ Dem Bot fehlen Berechtigungen (z.B. Rollen verwalten). "
+                "Bitte prüfe die Servereinstellungen."
+            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(msg, ephemeral=True)
+            else:
+                await interaction.followup.send(msg, ephemeral=True)
+        else:
+            log.error("Unhandled error in admin cog: %s", error, exc_info=error)
+            msg = "❌ Ein unerwarteter Fehler ist aufgetreten."
+            if not interaction.response.is_done():
+                await interaction.response.send_message(msg, ephemeral=True)
+            else:
+                await interaction.followup.send(msg, ephemeral=True)
 
 
 async def setup(bot: SocialStatsBot) -> None:

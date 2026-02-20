@@ -1,18 +1,9 @@
-# NirukiSocialStats Discord Bot Configuration
-# Copy this file to config.toml and fill in your values.
-# This file contains settings that cannot be changed via Discord commands.
+# Bot configuration – fill in your own tokens/keys
 
 [bot]
-token = "YOUR_DISCORD_BOT_TOKEN_HERE"
-
-[admin]
-# Discord User ID of the bot admin (only this user can link accounts)
-user_id = 0
+token = "YOUR_DISCORD_BOT_TOKEN"
 
 [api_keys]
-# YouTube Data API v3 key
-youtube_api_key = "YOUR_YOUTUBE_API_KEY_HERE"
-
-# Twitch API credentials (Client ID + Client Secret for OAuth)
-twitch_client_id = "YOUR_TWITCH_CLIENT_ID_HERE"
-twitch_client_secret = "YOUR_TWITCH_CLIENT_SECRET_HERE"
+youtube_api_key = "YOUR_YOUTUBE_DATA_API_V3_KEY"
+twitch_client_id = "YOUR_TWITCH_CLIENT_ID"
+twitch_client_secret = "YOUR_TWITCH_CLIENT_SECRET"

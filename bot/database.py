@@ -3,18 +3,21 @@ Database module – SQLite via aiosqlite.
 
 All tables:
   - guild_settings: per-guild configurable settings
-  - linked_accounts: discord_user -> youtube/twitch mapping
-  - sub_history: timestamped subscriber/follower snapshots
+  - linked_accounts: discord_user -> youtube/twitch mapping (multiple per user)
+  - sub_history: timestamped subscriber/follower snapshots (deduplicated)
   - role_designs: custom role name/colour patterns per range
-  - refresh_status: tracks last refresh time & result per account
+  - scoreboard_messages: persistent scoreboard message IDs
 """
 
 from __future__ import annotations
 
+import logging
 import aiosqlite
 import time
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "bot.db"
 
@@ -27,8 +30,8 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     tw_scoreboard_size         INTEGER DEFAULT 10,
     yt_refresh_interval        INTEGER DEFAULT 600,
     tw_refresh_interval        INTEGER DEFAULT 600,
-    yt_default_role_pattern    TEXT    DEFAULT '{count} YouTube Abos',
-    tw_default_role_pattern    TEXT    DEFAULT '{count} Twitch Follower',
+    yt_default_role_pattern    TEXT    DEFAULT '{name} - {count} Abos',
+    tw_default_role_pattern    TEXT    DEFAULT '{name} - {count} Follower',
     yt_default_role_color      INTEGER DEFAULT 16711680,
     tw_default_role_color      INTEGER DEFAULT 6570404
 );
@@ -43,7 +46,7 @@ CREATE TABLE IF NOT EXISTS linked_accounts (
     current_count   INTEGER DEFAULT 0,
     last_refreshed  REAL    DEFAULT 0,
     last_status     TEXT    DEFAULT 'pending',
-    UNIQUE(guild_id, discord_user_id, platform)
+    UNIQUE(guild_id, discord_user_id, platform, platform_id)
 );
 
 CREATE TABLE IF NOT EXISTS sub_history (
@@ -51,6 +54,7 @@ CREATE TABLE IF NOT EXISTS sub_history (
     guild_id        INTEGER NOT NULL,
     discord_user_id INTEGER NOT NULL,
     platform        TEXT    NOT NULL,
+    platform_id     TEXT    NOT NULL DEFAULT '',
     count           INTEGER NOT NULL,
     recorded_at     REAL    NOT NULL
 );
@@ -62,7 +66,7 @@ CREATE TABLE IF NOT EXISTS role_designs (
     range_min       INTEGER NOT NULL,
     range_max       INTEGER,
     exact_count     INTEGER,
-    role_pattern    TEXT    NOT NULL DEFAULT '{count} Abos',
+    role_pattern    TEXT    NOT NULL DEFAULT '{name} - {count} Abos',
     role_color      INTEGER NOT NULL DEFAULT 0,
     UNIQUE(guild_id, platform, range_min, range_max, exact_count)
 );
@@ -77,6 +81,7 @@ CREATE TABLE IF NOT EXISTS scoreboard_messages (
 
 CREATE INDEX IF NOT EXISTS idx_linked_guild ON linked_accounts(guild_id);
 CREATE INDEX IF NOT EXISTS idx_history_guild ON sub_history(guild_id, platform);
+CREATE INDEX IF NOT EXISTS idx_history_account ON sub_history(guild_id, discord_user_id, platform, platform_id);
 """
 
 
@@ -93,6 +98,67 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
         await self._db.commit()
+        await self._migrate()
+
+    async def _migrate(self) -> None:
+        """Run migrations for schema changes on existing databases."""
+        try:
+            # Migration: multi-account support (old UNIQUE was guild+user+platform)
+            async with self.db.execute("PRAGMA index_list(linked_accounts)") as cur:
+                indexes = await cur.fetchall()
+
+            for idx in indexes:
+                idx_name = idx[1]
+                async with self.db.execute(f"PRAGMA index_info('{idx_name}')") as cur:
+                    idx_cols = [row[2] for row in await cur.fetchall()]
+                if set(idx_cols) == {"guild_id", "discord_user_id", "platform"}:
+                    log.info("Migrating linked_accounts to multi-account schema...")
+                    await self.db.executescript("""
+                        ALTER TABLE linked_accounts RENAME TO _linked_accounts_old;
+                        CREATE TABLE linked_accounts (
+                            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            guild_id        INTEGER NOT NULL,
+                            discord_user_id INTEGER NOT NULL,
+                            platform        TEXT    NOT NULL CHECK(platform IN ('youtube', 'twitch')),
+                            platform_id     TEXT    NOT NULL,
+                            platform_name   TEXT    DEFAULT '',
+                            current_count   INTEGER DEFAULT 0,
+                            last_refreshed  REAL    DEFAULT 0,
+                            last_status     TEXT    DEFAULT 'pending',
+                            UNIQUE(guild_id, discord_user_id, platform, platform_id)
+                        );
+                        INSERT INTO linked_accounts SELECT * FROM _linked_accounts_old;
+                        DROP TABLE _linked_accounts_old;
+                    """)
+                    await self.db.commit()
+                    log.info("Migration complete.")
+                    break
+
+            # Migration: add platform_id to sub_history if missing
+            async with self.db.execute("PRAGMA table_info(sub_history)") as cur:
+                history_cols = [row[1] for row in await cur.fetchall()]
+            if "platform_id" not in history_cols:
+                log.info("Adding platform_id column to sub_history...")
+                await self.db.execute(
+                    "ALTER TABLE sub_history ADD COLUMN platform_id TEXT NOT NULL DEFAULT ''"
+                )
+                await self.db.commit()
+
+            # Migration: update default role patterns from old format
+            await self.db.execute("""
+                UPDATE guild_settings
+                SET yt_default_role_pattern = '{name} - {count} Abos'
+                WHERE yt_default_role_pattern = '{count} YouTube Abos'
+            """)
+            await self.db.execute("""
+                UPDATE guild_settings
+                SET tw_default_role_pattern = '{name} - {count} Follower'
+                WHERE tw_default_role_pattern = '{count} Twitch Follower'
+            """)
+            await self.db.commit()
+
+        except Exception as e:
+            log.warning("Migration check failed (may be fine for fresh DB): %s", e)
 
     async def close(self) -> None:
         if self._db:
@@ -151,12 +217,12 @@ class Database:
         platform_id: str,
         platform_name: str = "",
     ) -> None:
+        """Link a platform account. Allows multiple accounts per user per platform."""
         await self.db.execute(
             """INSERT INTO linked_accounts (guild_id, discord_user_id, platform, platform_id, platform_name)
                VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(guild_id, discord_user_id, platform)
-               DO UPDATE SET platform_id = excluded.platform_id,
-                             platform_name = excluded.platform_name,
+               ON CONFLICT(guild_id, discord_user_id, platform, platform_id)
+               DO UPDATE SET platform_name = excluded.platform_name,
                              last_status = 'pending'
             """,
             (guild_id, discord_user_id, platform, platform_id, platform_name),
@@ -164,24 +230,67 @@ class Database:
         await self.db.commit()
 
     async def unlink_account(
-        self, guild_id: int, discord_user_id: int, platform: str
+        self, guild_id: int, discord_user_id: int, platform: str, platform_id: str
     ) -> bool:
+        """Unlink a specific platform account by platform_id."""
         cur = await self.db.execute(
-            "DELETE FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ?",
-            (guild_id, discord_user_id, platform),
+            "DELETE FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?",
+            (guild_id, discord_user_id, platform, platform_id),
         )
         await self.db.commit()
         return cur.rowcount > 0
 
-    async def get_linked_account(
-        self, guild_id: int, discord_user_id: int, platform: str
-    ) -> Optional[dict]:
+    async def unlink_account_by_name(
+        self, guild_id: int, discord_user_id: int, platform: str, platform_name: str
+    ) -> Optional[str]:
+        """Unlink by platform_name (case-insensitive). Returns platform_id if found."""
         async with self.db.execute(
-            "SELECT * FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ?",
-            (guild_id, discord_user_id, platform),
+            "SELECT platform_id FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND LOWER(platform_name) = LOWER(?)",
+            (guild_id, discord_user_id, platform, platform_name),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            return None
+        platform_id = row[0]
+        await self.db.execute(
+            "DELETE FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?",
+            (guild_id, discord_user_id, platform, platform_id),
+        )
+        await self.db.commit()
+        return platform_id
+
+    async def get_linked_account(
+        self, guild_id: int, discord_user_id: int, platform: str, platform_id: str
+    ) -> Optional[dict]:
+        """Get a specific linked account."""
+        async with self.db.execute(
+            "SELECT * FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?",
+            (guild_id, discord_user_id, platform, platform_id),
         ) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
+
+    async def find_linked_account_by_name(
+        self, guild_id: int, discord_user_id: int, platform: str, platform_name: str
+    ) -> Optional[dict]:
+        """Find linked account by platform_name (case-insensitive)."""
+        async with self.db.execute(
+            "SELECT * FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND LOWER(platform_name) = LOWER(?)",
+            (guild_id, discord_user_id, platform, platform_name),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_linked_accounts_for_user(
+        self, guild_id: int, discord_user_id: int, platform: str
+    ) -> list[dict]:
+        """Get all linked accounts for a user on a platform."""
+        async with self.db.execute(
+            "SELECT * FROM linked_accounts WHERE guild_id = ? AND discord_user_id = ? AND platform = ? ORDER BY current_count DESC",
+            (guild_id, discord_user_id, platform),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
     async def get_all_linked(self, guild_id: int, platform: str) -> list[dict]:
         async with self.db.execute(
@@ -207,41 +316,62 @@ class Database:
         guild_id: int,
         discord_user_id: int,
         platform: str,
+        platform_id: str,
         count: int,
         status: str = "ok",
     ) -> None:
+        """Update account count and record history (deduplicated)."""
         now = time.time()
         await self.db.execute(
             """UPDATE linked_accounts
                SET current_count = ?, last_refreshed = ?, last_status = ?
-               WHERE guild_id = ? AND discord_user_id = ? AND platform = ?""",
-            (count, now, status, guild_id, discord_user_id, platform),
+               WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?""",
+            (count, now, status, guild_id, discord_user_id, platform, platform_id),
         )
-        # record history
-        await self.db.execute(
-            "INSERT INTO sub_history (guild_id, discord_user_id, platform, count, recorded_at) VALUES (?, ?, ?, ?, ?)",
-            (guild_id, discord_user_id, platform, count, now),
-        )
+
+        # Deduplicated history: if last two entries have the same count as new,
+        # update the latest entry's timestamp instead of inserting a new one.
+        # This keeps the first and last entry of unchanged streaks.
+        async with self.db.execute(
+            """SELECT id, count FROM sub_history
+               WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?
+               ORDER BY recorded_at DESC LIMIT 2""",
+            (guild_id, discord_user_id, platform, platform_id),
+        ) as cur:
+            recent = await cur.fetchall()
+
+        if len(recent) >= 2 and recent[0][1] == count and recent[1][1] == count:
+            # prev2, prev1, and new are the same count – update latest timestamp
+            await self.db.execute(
+                "UPDATE sub_history SET recorded_at = ? WHERE id = ?",
+                (now, recent[0][0]),
+            )
+        else:
+            # Count changed or not enough history – insert new entry
+            await self.db.execute(
+                "INSERT INTO sub_history (guild_id, discord_user_id, platform, platform_id, count, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (guild_id, discord_user_id, platform, platform_id, count, now),
+            )
         await self.db.commit()
 
     async def set_account_status(
-        self, guild_id: int, discord_user_id: int, platform: str, status: str
+        self, guild_id: int, discord_user_id: int, platform: str, platform_id: str, status: str
     ) -> None:
         now = time.time()
         await self.db.execute(
-            "UPDATE linked_accounts SET last_refreshed = ?, last_status = ? WHERE guild_id = ? AND discord_user_id = ? AND platform = ?",
-            (now, status, guild_id, discord_user_id, platform),
+            "UPDATE linked_accounts SET last_refreshed = ?, last_status = ? WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ?",
+            (now, status, guild_id, discord_user_id, platform, platform_id),
         )
         await self.db.commit()
 
     # ── Sub / follower history ───────────────────────────────────────
 
     async def get_history(
-        self, guild_id: int, discord_user_id: int, platform: str, limit: int = 100
+        self, guild_id: int, discord_user_id: int, platform: str, platform_id: str, limit: int = 100
     ) -> list[dict]:
         async with self.db.execute(
-            "SELECT * FROM sub_history WHERE guild_id = ? AND discord_user_id = ? AND platform = ? ORDER BY recorded_at DESC LIMIT ?",
-            (guild_id, discord_user_id, platform, limit),
+            "SELECT * FROM sub_history WHERE guild_id = ? AND discord_user_id = ? AND platform = ? AND platform_id = ? ORDER BY recorded_at DESC LIMIT ?",
+            (guild_id, discord_user_id, platform, platform_id, limit),
         ) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]

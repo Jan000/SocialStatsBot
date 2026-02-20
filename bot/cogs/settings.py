@@ -1,8 +1,13 @@
 """
-Settings cog – all guild settings editable via slash commands.
+Settings cog – guild-specific configuration commands.
+
+All commands restricted to server administrators via Discord's
+built-in permission system (default_permissions).
 """
 
 from __future__ import annotations
+
+import logging
 
 import discord
 from discord import app_commands
@@ -10,308 +15,329 @@ from discord.ext import commands
 
 from bot.bot import SocialStatsBot
 
-
-def admin_only():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        bot: SocialStatsBot = interaction.client  # type: ignore
-        if not bot.is_admin(interaction.user.id):
-            await interaction.response.send_message(
-                "❌ Nur der Bot-Admin darf diesen Befehl verwenden.", ephemeral=True
-            )
-            return False
-        return True
-    return app_commands.check(predicate)
+log = logging.getLogger(__name__)
 
 
-# ── Helper to parse hex color strings ────────────────────────────────
-
-def parse_color(value: str) -> int:
-    """Parse a hex color string like '#FF0000' or 'FF0000' to int."""
-    value = value.strip().lstrip("#")
-    return int(value, 16)
-
-
-class SettingsCog(commands.Cog, name="Settings"):
-    """Befehle zum Konfigurieren des Bots (nur Admin)."""
+@app_commands.default_permissions(administrator=True)
+class SettingsCog(commands.GroupCog, group_name="settings"):
+    """Commands to configure bot settings per guild."""
 
     def __init__(self, bot: SocialStatsBot) -> None:
         self.bot = bot
 
-    # ── Show all settings ────────────────────────────────────────────
+    # ── /settings show ───────────────────────────────────────────────
 
-    @app_commands.command(name="show_settings", description="Zeige alle aktuellen Bot-Einstellungen für diesen Server.")
-    @admin_only()
-    async def show_settings(self, interaction: discord.Interaction) -> None:
+    @app_commands.command(name="show", description="Zeigt die aktuellen Einstellungen.")
+    async def show(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        s = await self.bot.db.get_guild_settings(interaction.guild.id)
+        s = await self.bot.db.get_guild_settings(interaction.guild_id)
 
         def ch(cid: int) -> str:
             return f"<#{cid}>" if cid else "Nicht gesetzt"
 
-        embed = discord.Embed(title="⚙️ Server-Einstellungen", color=0x2F3136)
-        embed.add_field(
-            name="YouTube",
-            value=(
-                f"Scoreboard-Channel: {ch(s['yt_scoreboard_channel_id'])}\n"
-                f"Scoreboard-Größe: {s['yt_scoreboard_size']}\n"
-                f"Refresh-Intervall: {s['yt_refresh_interval']}s\n"
-                f"Rollen-Pattern: `{s['yt_default_role_pattern']}`\n"
-                f"Rollen-Farbe: `#{s['yt_default_role_color']:06X}`"
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="Twitch",
-            value=(
-                f"Scoreboard-Channel: {ch(s['tw_scoreboard_channel_id'])}\n"
-                f"Scoreboard-Größe: {s['tw_scoreboard_size']}\n"
-                f"Refresh-Intervall: {s['tw_refresh_interval']}s\n"
-                f"Rollen-Pattern: `{s['tw_default_role_pattern']}`\n"
-                f"Rollen-Farbe: `#{s['tw_default_role_color']:06X}`"
-            ),
-            inline=False,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        lines = [
+            "**⚙️ Aktuelle Einstellungen:**\n",
+            f"📺 **YouTube Scoreboard-Kanal:** {ch(s['yt_scoreboard_channel_id'])}",
+            f"📺 **YouTube Scoreboard-Größe:** {s['yt_scoreboard_size']}",
+            f"📺 **YouTube Refresh-Intervall:** {s['yt_refresh_interval']}s",
+            f"📺 **YouTube Rollen-Pattern:** `{s['yt_default_role_pattern']}`",
+            f"📺 **YouTube Rollen-Farbe:** #{s['yt_default_role_color']:06X}",
+            "",
+            f"🎮 **Twitch Scoreboard-Kanal:** {ch(s['tw_scoreboard_channel_id'])}",
+            f"🎮 **Twitch Scoreboard-Größe:** {s['tw_scoreboard_size']}",
+            f"🎮 **Twitch Refresh-Intervall:** {s['tw_refresh_interval']}s",
+            f"🎮 **Twitch Rollen-Pattern:** `{s['tw_default_role_pattern']}`",
+            f"🎮 **Twitch Rollen-Farbe:** #{s['tw_default_role_color']:06X}",
+        ]
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
-    # ── Set scoreboard channel ───────────────────────────────────────
+    # ── /settings scoreboard_channel ─────────────────────────────────
 
-    @app_commands.command(name="set_scoreboard_channel", description="Setze den Scoreboard-Channel.")
-    @app_commands.describe(
-        platform="youtube oder twitch",
-        channel="Der Text-Channel für das Scoreboard",
+    @app_commands.command(
+        name="scoreboard_channel",
+        description="Setzt den Scoreboard-Kanal für eine Plattform.",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def set_scoreboard_channel(
+    @app_commands.describe(platform="Plattform", channel="Text-Kanal")
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def scoreboard_channel(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         channel: discord.TextChannel,
     ) -> None:
         key = "yt_scoreboard_channel_id" if platform.value == "youtube" else "tw_scoreboard_channel_id"
-        await self.bot.db.update_guild_setting(interaction.guild.id, key, channel.id)
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, channel.id)
         await interaction.response.send_message(
-            f"✅ {platform.name}-Scoreboard-Channel auf {channel.mention} gesetzt.",
+            f"✅ {platform.name} Scoreboard-Kanal auf {channel.mention} gesetzt.",
             ephemeral=True,
         )
 
-    # ── Set scoreboard size ──────────────────────────────────────────
+    # ── /settings scoreboard_size ────────────────────────────────────
 
-    @app_commands.command(name="set_scoreboard_size", description="Setze die Anzahl der User im Scoreboard.")
-    @app_commands.describe(
-        platform="youtube oder twitch",
-        size="Anzahl der angezeigten User (1-50)",
+    @app_commands.command(
+        name="scoreboard_size",
+        description="Setzt die maximale Anzahl an Einträgen im Scoreboard.",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def set_scoreboard_size(
+    @app_commands.describe(platform="Plattform", size="Anzahl (1–50)")
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def scoreboard_size(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         size: app_commands.Range[int, 1, 50],
     ) -> None:
         key = "yt_scoreboard_size" if platform.value == "youtube" else "tw_scoreboard_size"
-        await self.bot.db.update_guild_setting(interaction.guild.id, key, size)
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, size)
         await interaction.response.send_message(
-            f"✅ {platform.name}-Scoreboard zeigt jetzt **{size}** User.",
+            f"✅ {platform.name} Scoreboard-Größe auf **{size}** gesetzt.",
             ephemeral=True,
         )
 
-    # ── Set refresh interval ─────────────────────────────────────────
+    # ── /settings refresh_interval ───────────────────────────────────
 
-    @app_commands.command(name="set_refresh_interval", description="Setze das Refresh-Intervall in Sekunden.")
-    @app_commands.describe(
-        platform="youtube oder twitch",
-        seconds="Intervall in Sekunden (min. 60)",
+    @app_commands.command(
+        name="refresh_interval",
+        description="Setzt das Aktualisierungs-Intervall (in Sekunden).",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def set_refresh_interval(
+    @app_commands.describe(platform="Plattform", seconds="Intervall in Sekunden (min. 60)")
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def refresh_interval(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         seconds: app_commands.Range[int, 60, 86400],
     ) -> None:
         key = "yt_refresh_interval" if platform.value == "youtube" else "tw_refresh_interval"
-        await self.bot.db.update_guild_setting(interaction.guild.id, key, seconds)
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, seconds)
         await interaction.response.send_message(
-            f"✅ {platform.name}-Refresh-Intervall auf **{seconds}s** gesetzt.",
+            f"✅ {platform.name} Refresh-Intervall auf **{seconds}s** gesetzt.",
             ephemeral=True,
         )
 
-    # ── Set default role pattern ─────────────────────────────────────
-
-    @app_commands.command(name="set_role_pattern", description="Setze das Standard-Rollen-Pattern (nutze {count} als Platzhalter).")
-    @app_commands.describe(
-        platform="youtube oder twitch",
-        pattern="z.B. '{count} YouTube Abos'",
-    )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def set_role_pattern(
-        self,
-        interaction: discord.Interaction,
-        platform: app_commands.Choice[str],
-        pattern: str,
-    ) -> None:
-        key = "yt_default_role_pattern" if platform.value == "youtube" else "tw_default_role_pattern"
-        await self.bot.db.update_guild_setting(interaction.guild.id, key, pattern)
-        await interaction.response.send_message(
-            f"✅ Standard-Rollen-Pattern für {platform.name}: `{pattern}`",
-            ephemeral=True,
-        )
-
-    # ── Set default role color ───────────────────────────────────────
-
-    @app_commands.command(name="set_role_color", description="Setze die Standard-Rollen-Farbe (Hex, z.B. #FF0000).")
-    @app_commands.describe(
-        platform="youtube oder twitch",
-        color="Hex-Farbcode, z.B. #FF0000",
-    )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def set_role_color(
-        self,
-        interaction: discord.Interaction,
-        platform: app_commands.Choice[str],
-        color: str,
-    ) -> None:
-        try:
-            color_int = parse_color(color)
-        except ValueError:
-            await interaction.response.send_message(
-                "❌ Ungültiger Hex-Farbcode. Beispiel: `#FF0000`", ephemeral=True
-            )
-            return
-        key = "yt_default_role_color" if platform.value == "youtube" else "tw_default_role_color"
-        await self.bot.db.update_guild_setting(interaction.guild.id, key, color_int)
-        await interaction.response.send_message(
-            f"✅ Standard-Rollen-Farbe für {platform.name}: `#{color_int:06X}`",
-            ephemeral=True,
-        )
-
-    # ── Role design (custom per range / exact count) ─────────────────
+    # ── /settings role_pattern ───────────────────────────────────────
 
     @app_commands.command(
-        name="add_role_design",
-        description="Füge ein benutzerdefiniertes Rollen-Design für einen Abo-Bereich hinzu.",
+        name="role_pattern",
+        description="Setzt das Standard-Rollen-Pattern. Platzhalter: {name}, {count}",
     )
     @app_commands.describe(
-        platform="youtube oder twitch",
-        range_min="Untere Grenze des Bereichs",
-        range_max="Obere Grenze des Bereichs (leer = unbegrenzt)",
-        exact_count="Exakter Wert (überschreibt Bereich)",
-        pattern="Rollen-Name-Pattern ({count} = Platzhalter)",
-        color="Hex-Farbcode, z.B. #FF0000",
+        platform="Plattform",
+        pattern="Pattern mit {name} und {count} (z.B. '{name} - {count} Abos')",
     )
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
-    async def add_role_design(
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def role_pattern(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         pattern: str,
-        color: str,
-        range_min: int = 0,
-        range_max: int | None = None,
-        exact_count: int | None = None,
+    ) -> None:
+        if "{count}" not in pattern:
+            await interaction.response.send_message(
+                "❌ Pattern muss `{count}` enthalten.", ephemeral=True
+            )
+            return
+        key = "yt_default_role_pattern" if platform.value == "youtube" else "tw_default_role_pattern"
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, pattern)
+        await interaction.response.send_message(
+            f"✅ {platform.name} Rollen-Pattern auf `{pattern}` gesetzt.",
+            ephemeral=True,
+        )
+
+    # ── /settings role_color ─────────────────────────────────────────
+
+    @app_commands.command(
+        name="role_color",
+        description="Setzt die Standard-Rollenfarbe (Hex, z.B. FF0000).",
+    )
+    @app_commands.describe(platform="Plattform", hex_color="Farbe als Hex (z.B. FF0000)")
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def role_color(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str],
+        hex_color: str,
     ) -> None:
         try:
-            color_int = parse_color(color)
+            color_int = int(hex_color.strip("#"), 16)
         except ValueError:
             await interaction.response.send_message(
-                "❌ Ungültiger Hex-Farbcode.", ephemeral=True
+                "❌ Ungültiger Hex-Farbwert.", ephemeral=True
             )
+            return
+
+        key = "yt_default_role_color" if platform.value == "youtube" else "tw_default_role_color"
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, color_int)
+        await interaction.response.send_message(
+            f"✅ {platform.name} Rollenfarbe auf `#{color_int:06X}` gesetzt.",
+            ephemeral=True,
+        )
+
+    # ── /settings role_design ────────────────────────────────────────
+
+    @app_commands.command(
+        name="role_design",
+        description="Erstellt ein benutzerdefiniertes Rollen-Design für einen Bereich.",
+    )
+    @app_commands.describe(
+        platform="Plattform",
+        range_min="Ab-Wert (z.B. 1000)",
+        range_max="Bis-Wert (leer = unbegrenzt)",
+        pattern="Rollen-Pattern mit {name} und {count}",
+        hex_color="Farbe als Hex",
+    )
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def role_design(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str],
+        range_min: int,
+        pattern: str,
+        hex_color: str,
+        range_max: int = None,
+    ) -> None:
+        try:
+            color = int(hex_color.strip("#"), 16)
+        except ValueError:
+            await interaction.response.send_message("❌ Ungültiger Hex-Farbwert.", ephemeral=True)
             return
 
         await self.bot.db.set_role_design(
-            guild_id=interaction.guild.id,
-            platform=platform.value,
-            role_pattern=pattern,
-            role_color=color_int,
+            interaction.guild_id,
+            platform.value,
+            pattern,
+            color,
             range_min=range_min,
             range_max=range_max,
-            exact_count=exact_count,
         )
-
-        if exact_count is not None:
-            desc = f"exakt **{exact_count:,}**"
-        elif range_max is not None:
-            desc = f"**{range_min:,}** – **{range_max:,}**"
-        else:
-            desc = f"**{range_min:,}+**"
-
+        range_str = f"{range_min}–{range_max}" if range_max else f"ab {range_min}"
         await interaction.response.send_message(
-            f"✅ Rollen-Design für {platform.name} ({desc}): `{pattern}` / `#{color_int:06X}`",
+            f"✅ {platform.name} Role-Design für **{range_str}** gespeichert.\n"
+            f"Pattern: `{pattern}`, Farbe: `#{color:06X}`",
             ephemeral=True,
         )
 
+    # ── /settings role_design_exact ──────────────────────────────────
+
+    @app_commands.command(
+        name="role_design_exact",
+        description="Erstellt ein Rollen-Design für eine exakte Zahl.",
+    )
+    @app_commands.describe(
+        platform="Plattform",
+        exact_count="Exakter Wert",
+        pattern="Rollen-Pattern mit {name} und {count}",
+        hex_color="Farbe als Hex",
+    )
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def role_design_exact(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str],
+        exact_count: int,
+        pattern: str,
+        hex_color: str,
+    ) -> None:
+        try:
+            color = int(hex_color.strip("#"), 16)
+        except ValueError:
+            await interaction.response.send_message("❌ Ungültiger Hex-Farbwert.", ephemeral=True)
+            return
+
+        await self.bot.db.set_role_design(
+            interaction.guild_id,
+            platform.value,
+            pattern,
+            color,
+            exact_count=exact_count,
+        )
+        await interaction.response.send_message(
+            f"✅ {platform.name} Role-Design für exakt **{exact_count}** gespeichert.\n"
+            f"Pattern: `{pattern}`, Farbe: `#{color:06X}`",
+            ephemeral=True,
+        )
+
+    # ── /settings list_role_designs ──────────────────────────────────
+
     @app_commands.command(
         name="list_role_designs",
-        description="Zeige alle benutzerdefinierten Rollen-Designs.",
+        description="Zeigt alle benutzerdefinierten Rollen-Designs.",
     )
-    @app_commands.describe(platform="youtube oder twitch")
-    @app_commands.choices(platform=[
-        app_commands.Choice(name="YouTube", value="youtube"),
-        app_commands.Choice(name="Twitch", value="twitch"),
-    ])
-    @admin_only()
+    @app_commands.describe(platform="Plattform")
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
     async def list_role_designs(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
     ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        designs = await self.bot.db.get_role_designs(interaction.guild.id, platform.value)
+        designs = await self.bot.db.get_role_designs(interaction.guild_id, platform.value)
         if not designs:
-            await interaction.followup.send(
-                f"Keine benutzerdefinierten Rollen-Designs für {platform.name}.", ephemeral=True
+            await interaction.response.send_message(
+                f"Keine benutzerdefinierten Rollen-Designs für {platform.name}.",
+                ephemeral=True,
             )
             return
 
-        lines: list[str] = []
+        lines = [f"**🎨 {platform.name} Rollen-Designs:**\n"]
         for d in designs:
             if d["exact_count"] is not None:
-                scope = f"exakt {d['exact_count']:,}"
-            elif d["range_max"] is not None:
-                scope = f"{d['range_min']:,} – {d['range_max']:,}"
+                scope = f"Exakt {d['exact_count']}"
+            elif d["range_max"]:
+                scope = f"{d['range_min']}–{d['range_max']}"
             else:
-                scope = f"{d['range_min']:,}+"
+                scope = f"Ab {d['range_min']}"
             lines.append(
-                f"**ID {d['id']}** | {scope} | `{d['role_pattern']}` | `#{d['role_color']:06X}`"
+                f"  **ID {d['id']}** | {scope} | `{d['role_pattern']}` | #{d['role_color']:06X}"
             )
 
-        embed = discord.Embed(
-            title=f"Rollen-Designs – {platform.name}",
-            description="\n".join(lines),
-            color=0xFF0000 if platform.value == "youtube" else 0x6441A4,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    # ── /settings remove_role_design ─────────────────────────────────
 
     @app_commands.command(
         name="remove_role_design",
-        description="Entferne ein benutzerdefiniertes Rollen-Design anhand seiner ID.",
+        description="Entfernt ein Rollen-Design anhand seiner ID.",
     )
-    @app_commands.describe(design_id="Die ID des Designs (siehe /list_role_designs)")
-    @admin_only()
+    @app_commands.describe(design_id="ID des Rollen-Designs")
     async def remove_role_design(
         self,
         interaction: discord.Interaction,
@@ -324,8 +350,24 @@ class SettingsCog(commands.Cog, name="Settings"):
             )
         else:
             await interaction.response.send_message(
-                f"❌ Design mit ID {design_id} nicht gefunden.", ephemeral=True
+                f"❌ Kein Rollen-Design mit ID **{design_id}** gefunden.", ephemeral=True
             )
+
+    # ── Error handler ────────────────────────────────────────────────
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        if isinstance(error, (app_commands.MissingPermissions, app_commands.CheckFailure)):
+            msg = "❌ Du hast keine Berechtigung für diesen Befehl."
+        else:
+            log.error("Error in settings cog: %s", error, exc_info=error)
+            msg = "❌ Ein unerwarteter Fehler ist aufgetreten."
+
+        if not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await interaction.followup.send(msg, ephemeral=True)
 
 
 async def setup(bot: SocialStatsBot) -> None:

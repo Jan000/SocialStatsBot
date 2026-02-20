@@ -1,19 +1,46 @@
 """
-Twitch Helix API service – fetch follower counts.
+Twitch Helix API service – fetch follower counts via Client Credentials.
 """
 
 from __future__ import annotations
 
+import re
+import logging
 import aiohttp
 from typing import Optional
 
-TWITCH_AUTH_URL = "https://id.twitch.tv/oauth2/token"
-TWITCH_USERS_URL = "https://api.twitch.tv/helix/users"
-TWITCH_FOLLOWERS_URL = "https://api.twitch.tv/helix/channels/followers"
+log = logging.getLogger(__name__)
+
+TWITCH_HELIX = "https://api.twitch.tv/helix"
+TWITCH_OAUTH = "https://id.twitch.tv/oauth2/token"
+
+# Patterns for parsing Twitch input
+_TW_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?twitch\.tv/([\w]+)/?", re.IGNORECASE
+)
+_TW_RAW_LOGIN_RE = re.compile(r"^[\w]{2,25}$")
+
+
+def parse_twitch_input(value: str) -> str:
+    """
+    Parse a Twitch input and return the login name.
+
+    Accepts:
+      - https://www.twitch.tv/niruki  -> 'niruki'
+      - twitch.tv/niruki               -> 'niruki'
+      - niruki                         -> 'niruki'
+    """
+    value = value.strip()
+    m = _TW_URL_RE.match(value)
+    if m:
+        return m.group(1).lower()
+    if _TW_RAW_LOGIN_RE.match(value):
+        return value.lower()
+    return value.lower()
 
 
 class TwitchService:
-    """Fetches Twitch channel follower counts using the Helix API."""
+    """Fetches Twitch follower counts using Helix API with Client Credentials."""
 
     def __init__(self, client_id: str, client_secret: str) -> None:
         self.client_id = client_id
@@ -30,89 +57,104 @@ class TwitchService:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def _ensure_token(self) -> str:
-        """Obtain an app access token if we don't have one."""
+    async def _ensure_token(self) -> bool:
+        """Obtain or refresh the app access token."""
         if self._access_token:
-            return self._access_token
+            return True
         session = await self._get_session()
-        params = {
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-            "grant_type": "client_credentials",
-        }
-        async with session.post(TWITCH_AUTH_URL, params=params) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"Twitch auth failed: {resp.status}")
-            data = await resp.json()
-            self._access_token = data["access_token"]
-            return self._access_token
+        try:
+            async with session.post(
+                TWITCH_OAUTH,
+                params={
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "grant_type": "client_credentials",
+                },
+            ) as resp:
+                if resp.status != 200:
+                    log.error("Twitch OAuth failed: %s", resp.status)
+                    return False
+                data = await resp.json()
+                self._access_token = data["access_token"]
+                return True
+        except Exception as e:
+            log.error("Twitch OAuth error: %s", e)
+            return False
 
-    async def _headers(self) -> dict:
-        token = await self._ensure_token()
+    def _headers(self) -> dict:
         return {
             "Client-ID": self.client_id,
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {self._access_token}",
         }
 
-    async def get_user(self, login: str) -> Optional[dict]:
-        """Get Twitch user info by login name."""
+    async def _helix_get(self, endpoint: str, params: dict) -> Optional[dict]:
+        """Make an authenticated GET request to the Helix API."""
+        if not await self._ensure_token():
+            return None
         session = await self._get_session()
-        headers = await self._headers()
-        params = {"login": login}
         try:
-            async with session.get(TWITCH_USERS_URL, headers=headers, params=params) as resp:
+            async with session.get(
+                f"{TWITCH_HELIX}/{endpoint}", headers=self._headers(), params=params
+            ) as resp:
                 if resp.status == 401:
                     self._access_token = None
-                    headers = await self._headers()
-                    async with session.get(TWITCH_USERS_URL, headers=headers, params=params) as retry:
-                        data = await retry.json()
-                else:
-                    data = await resp.json()
-                users = data.get("data", [])
-                if not users:
+                    if not await self._ensure_token():
+                        return None
+                    async with session.get(
+                        f"{TWITCH_HELIX}/{endpoint}", headers=self._headers(), params=params
+                    ) as resp2:
+                        if resp2.status != 200:
+                            return None
+                        return await resp2.json()
+                if resp.status != 200:
                     return None
-                return users[0]
-        except Exception:
+                return await resp.json()
+        except Exception as e:
+            log.error("Twitch Helix error (%s): %s", endpoint, e)
             return None
 
-    async def get_user_by_id(self, user_id: str) -> Optional[dict]:
-        """Get Twitch user info by user ID."""
-        session = await self._get_session()
-        headers = await self._headers()
-        params = {"id": user_id}
-        try:
-            async with session.get(TWITCH_USERS_URL, headers=headers, params=params) as resp:
-                if resp.status == 401:
-                    self._access_token = None
-                    headers = await self._headers()
-                    async with session.get(TWITCH_USERS_URL, headers=headers, params=params) as retry:
-                        data = await retry.json()
-                else:
-                    data = await resp.json()
-                users = data.get("data", [])
-                if not users:
-                    return None
-                return users[0]
-        except Exception:
+    async def get_user(self, login: str) -> Optional[dict]:
+        """Lookup a Twitch user by login name. Returns dict with id, login, display_name."""
+        data = await self._helix_get("users", {"login": login})
+        if not data or not data.get("data"):
             return None
+        user = data["data"][0]
+        return {
+            "id": user["id"],
+            "login": user["login"],
+            "display_name": user.get("display_name", user["login"]),
+        }
+
+    async def resolve_user(self, user_input: str) -> Optional[dict]:
+        """Resolve a Twitch user from flexible input (URL, login name).
+
+        Returns dict with id, login, display_name, or None.
+        """
+        login = parse_twitch_input(user_input)
+        return await self.get_user(login)
 
     async def get_follower_count(self, broadcaster_id: str) -> Optional[int]:
-        """
-        Return the follower count for a Twitch broadcaster ID.
-        Uses the /channels/followers endpoint (total field).
-        """
-        session = await self._get_session()
-        headers = await self._headers()
-        params = {"broadcaster_id": broadcaster_id, "first": "1"}
-        try:
-            async with session.get(TWITCH_FOLLOWERS_URL, headers=headers, params=params) as resp:
-                if resp.status == 401:
-                    self._access_token = None
-                    headers = await self._headers()
-                    async with session.get(TWITCH_FOLLOWERS_URL, headers=headers, params=params) as retry:
-                        data = await retry.json()
-                else:
-                    data = await resp.json()
-                return data.get("total")
-        except Exception:
+        """Return the follower count for a Twitch broadcaster ID."""
+        data = await self._helix_get(
+            "channels/followers", {"broadcaster_id": broadcaster_id, "first": "1"}
+        )
+        if data is None:
             return None
+        return data.get("total")
+
+    async def get_channel_info(self, user_input: str) -> Optional[dict]:
+        """Full resolve: accept URL/login, return id, login, display_name, follower_count."""
+        user = await self.resolve_user(user_input)
+        if user is None:
+            return None
+
+        followers = await self.get_follower_count(user["id"])
+        if followers is None:
+            return None
+
+        return {
+            "id": user["id"],
+            "login": user["login"],
+            "display_name": user["display_name"],
+            "follower_count": followers,
+        }

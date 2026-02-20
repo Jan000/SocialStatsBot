@@ -4,12 +4,15 @@ Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt und al
 
 ## Features
 
-- **YouTube & Twitch Account-Verknüpfung** – Admin verknüpft Discord-User mit YouTube/Twitch Accounts
-- **Automatische Rollen** – Jeder verknüpfte User bekommt eine Rolle mit seiner aktuellen Abo-/Follower-Zahl
+- **YouTube & Twitch Account-Verknüpfung** – Admins verknüpfen Discord-User mit YouTube/Twitch Accounts
+- **Multi-Account-Support** – Ein User kann mehrere Accounts pro Plattform haben
+- **Automatische Rollen** – Jeder Account bekommt eine eigene Rolle mit Name und Zahl (z.B. `[YouTube] Niruki - 1.234 Abos`)
 - **Scoreboards** – Top-N Leaderboards in konfigurierbaren Channels, auto-aktualisiert
 - **Benutzerdefinierte Rollen-Designs** – Eigene Rollen-Muster je Abo-Bereich oder exakter Zahl
 - **Vollständige Konfiguration per Discord-Commands** – Intervalle, Channels, Scoreboard-Größe, Rollen-Design
-- **Historien-Tracking** – Alle Änderungen mit Zeitstempel in SQLite gespeichert
+- **Historien-Tracking** – Alle Änderungen dedupliziert in SQLite gespeichert
+- **Flexible Eingabe** – YouTube-URLs, @Handles, Channel-IDs sowie Twitch-URLs und Login-Namen
+- **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert
 
 ## Setup
 
@@ -20,47 +23,51 @@ Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt und al
    ```
 3. `config.toml.example` nach `config.toml` kopieren und ausfüllen:
    - Discord Bot Token
-   - Admin User ID
    - YouTube API Key
    - Twitch Client ID & Secret
 4. Bot starten:
    ```bash
    python main.py
    ```
+5. **Berechtigungen konfigurieren**: In Discord unter Server-Einstellungen > Integrationen den Zugriff auf die Bot-Commands konfigurieren.
 
 ## Slash Commands
 
-### Admin-Commands (nur Admin-User)
-| Command | Beschreibung |
-|---|---|
-| `/link_youtube` | Discord-User mit YouTube-Kanal verknüpfen |
-| `/link_twitch` | Discord-User mit Twitch-Account verknüpfen |
-| `/unlink` | Verknüpfung entfernen |
-| `/list_accounts` | Alle verknüpften Accounts anzeigen |
-| `/force_refresh` | Sofortigen Refresh für einen User erzwingen |
-| `/refresh_status` | Refresh-Status aller Accounts anzeigen |
-| `/history` | Abo-/Follower-Verlauf anzeigen |
+### Admin-Commands (`/admin ...`)
+Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-Einstellungen > Integrationen angepasst werden.
 
-### Einstellungen (nur Admin-User)
 | Command | Beschreibung |
 |---|---|
-| `/show_settings` | Alle Einstellungen anzeigen |
-| `/set_scoreboard_channel` | Scoreboard-Channel setzen |
-| `/set_scoreboard_size` | Anzahl User im Scoreboard (1-50) |
-| `/set_refresh_interval` | Refresh-Intervall in Sekunden (60-86400) |
-| `/set_role_pattern` | Standard-Rollen-Pattern (`{count}` = Platzhalter) |
-| `/set_role_color` | Standard-Rollen-Farbe (Hex) |
-| `/add_role_design` | Benutzerdefiniertes Design für Bereich/exakte Zahl |
-| `/list_role_designs` | Alle benutzerdefinierten Designs anzeigen |
-| `/remove_role_design` | Design entfernen |
+| `/admin link_youtube <user> <channel_input>` | YouTube-Kanal verknüpfen (URL, @Handle oder ID) |
+| `/admin link_twitch <user> <channel_input>` | Twitch-Account verknüpfen (URL oder Login-Name) |
+| `/admin unlink <user> <platform> <account_name>` | Bestimmten Account entfernen |
+| `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen |
+| `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |
+| `/admin history <user> <platform> <account_name>` | Abo-/Follower-Verlauf anzeigen |
+
+### Einstellungen (`/settings ...`)
+| Command | Beschreibung |
+|---|---|
+| `/settings show` | Alle Einstellungen anzeigen |
+| `/settings scoreboard_channel <platform> <channel>` | Scoreboard-Channel setzen |
+| `/settings scoreboard_size <platform> <size>` | Anzahl Einträge im Scoreboard (1-50) |
+| `/settings refresh_interval <platform> <seconds>` | Refresh-Intervall in Sekunden (60-86400) |
+| `/settings role_pattern <platform> <pattern>` | Rollen-Pattern (`{name}` und `{count}` = Platzhalter) |
+| `/settings role_color <platform> <hex_color>` | Standard-Rollen-Farbe |
+| `/settings role_design <platform> ...` | Benutzerdefiniertes Design für Bereich |
+| `/settings role_design_exact <platform> ...` | Design für exakte Zahl |
+| `/settings list_role_designs <platform>` | Alle Designs anzeigen |
+| `/settings remove_role_design <design_id>` | Design entfernen |
 
 ## Rollen-System
 
-Rollen werden automatisch erstellt und zugewiesen. Das Format:
-- YouTube: `[YT] {Pattern}` (z.B. `[YT] 1,234 YouTube Abos`)
-- Twitch: `[TW] {Pattern}` (z.B. `[TW] 567 Twitch Follower`)
+Rollen werden automatisch erstellt und zugewiesen. Jeder verknüpfte Account bekommt seine eigene Rolle:
+- YouTube: `[YouTube] {name} - {count} Abos` (z.B. `[YouTube] Niruki - 1.234 Abos`)
+- Twitch: `[Twitch] {name} - {count} Follower` (z.B. `[Twitch] Niruki - 567 Follower`)
 
-`{count}` im Pattern wird durch die aktuelle Zahl ersetzt.
+Platzhalter im Pattern:
+- `{name}` – Account-/Kanal-Name
+- `{count}` – Aktuelle Zahl (mit Punkt-Tausendertrennung)
 
 Nicht mehr benötigte Rollen werden automatisch gelöscht.
 
@@ -79,7 +86,7 @@ Nicht mehr benötigte Rollen werden automatisch gelöscht.
 │   ├── scoreboard.py        # Scoreboard-Embeds
 │   ├── cogs/
 │   │   ├── __init__.py
-│   │   ├── admin.py         # Admin-Commands (Link/Unlink/Status)
+│   │   ├── admin.py         # Admin-Commands (Link/Unlink/Accounts/History)
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   └── refresh.py       # Background-Refresh-Loop
 │   └── services/

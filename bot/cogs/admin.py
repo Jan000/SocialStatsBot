@@ -21,7 +21,7 @@ from bot.roles import (
     remove_account_roles,
     cleanup_unused_roles,
 )
-from bot.scoreboard import update_scoreboard
+from bot.scoreboard import update_count_channel, update_scoreboard
 from bot.pagination import PaginationView, paginate_lines
 
 log = logging.getLogger(__name__)
@@ -301,6 +301,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
 
             await cleanup_unused_roles(interaction.guild, plat)
             await update_scoreboard(self.bot, interaction.guild, plat, settings)
+            await update_count_channel(self.bot, interaction.guild, plat, settings)
 
         await interaction.followup.send(
             f"✅ Refresh abgeschlossen. **{total_updated}** Account(s) aktualisiert.",

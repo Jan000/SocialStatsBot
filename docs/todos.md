@@ -13,6 +13,8 @@
 - [x] **Unit-Tests** – 31 Tests für Database-Layer und Role-Logic (pytest + pytest-asyncio)
 - [x] **Rate-Limit-Management** – Token-Bucket Rate-Limiter in YouTube- und Twitch-Services
 - [x] **Twitch EventSub Webhooks** – Optionale WebSocket-Integration für Echtzeit-Updates bei Channel-Änderungen
+- [x] **Count-Channel** – Optionaler Channel pro Plattform, der bei jedem Refresh mit Gesamtzahl umbenannt wird
+- [x] **Einheitliche Plattform-Enum** – Alle plattformbezogenen Commands nutzen `@app_commands.choices(platform=[...])`
 
 ---
 

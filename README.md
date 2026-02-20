@@ -6,7 +6,8 @@ Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als D
 
 - **YouTube & Twitch Account-Verknüpfung** – Multi-Account-Support (mehrere Accounts pro User & Plattform)
 - **Automatische Rollen** – Jeder Account bekommt eine eigene Rolle (z.B. `[YouTube] MeinKanal - 1.234 Abos`)
-- **Scoreboards** – Top-N Leaderboards in konfigurierbaren Channels, auto-aktualisiert
+- **Scoreboards** – Leaderboards in konfigurierbaren Channels, auto-aktualisiert (alle Accounts, auto-split bei langen Listen)
+- **Count-Channel** – Ein Channel pro Plattform, dessen Name bei jedem Refresh auf die aktuelle Gesamtzahl aktualisiert wird (z.B. `📺 1.234 YouTube Abos`)
 - **Statistik-Commands** – Wachstumsanalyse über 7/30/90 Tage
 - **Benutzerdefinierte Rollen-Designs** – Eigene Rollen-Muster je Abo-Bereich oder exakter Zahl
 - **Autocomplete** – Account-Namen und Rollen-Design-IDs werden beim Tippen vorgeschlagen
@@ -81,6 +82,8 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 | `/settings role_design_exact <platform> ...` | Design für exakte Zahl |
 | `/settings list_role_designs <platform>` | Alle Designs anzeigen |
 | `/settings remove_role_design <design_id>` | Design entfernen (Autocomplete) |
+| `/settings count_channel <platform> <channel>` | Count-Channel setzen (Voice-/Text-Channel, wird bei Refresh umbenannt) |
+| `/settings count_channel_pattern <platform> <pattern>` | Count-Channel-Pattern (`{count}` als Platzhalter) |
 
 ## Rollen-System
 
@@ -93,6 +96,15 @@ Platzhalter im Pattern:
 - `{count}` – Aktuelle Zahl (mit Punkt-Tausendertrennung)
 
 Nicht mehr benötigte Rollen werden automatisch gelöscht.
+
+## Count-Channel
+
+Ein optionaler Voice- oder Text-Channel pro Plattform, dessen Name bei jedem Refresh auf die Gesamtzahl aller verknüpften Accounts aktualisiert wird.
+
+- Standard-Pattern YouTube: `📺 {count} YouTube Abos`
+- Standard-Pattern Twitch: `🎮 {count} Twitch Follower`
+- Platzhalter: `{count}` – Gesamtzahl aller Accounts (mit Punkt-Tausendertrennung)
+- Konfigurierbar über `/settings count_channel` und `/settings count_channel_pattern`
 
 ## Tests
 
@@ -116,7 +128,7 @@ pytest tests/ -v
 │   ├── bot.py               # Haupt-Bot-Klasse (SocialStatsBot)
 │   ├── database.py          # SQLite Datenbank-Layer (async, mit Migrationen)
 │   ├── roles.py             # Rollen-Management
-│   ├── scoreboard.py        # Scoreboard-Embeds
+│   ├── scoreboard.py        # Scoreboard-Embeds & Count-Channel-Rename
 │   ├── pagination.py        # PaginationView (Discord-Buttons)
 │   ├── ratelimit.py         # Token-Bucket Rate-Limiter
 │   ├── cogs/
@@ -133,6 +145,31 @@ pytest tests/ -v
 │   └── test_roles.py        # 11 Role-Logic-Tests
 ├── data/                    # SQLite DB (auto-erstellt)
 └── docs/
-    ├── status.md            # Entwicklungs-Fortschritt
     └── todos.md             # Aufgaben
 ```
+
+## Status
+
+**Phase:** Feature-Complete
+
+Alle geplanten Features sind implementiert:
+- Vollständige YouTube & Twitch API-Integration mit Rate-Limiting
+- Multi-Account-Verknüpfung, automatische Rollen, Scoreboards, Count-Channels
+- Statistik-Commands mit Wachstumsanalyse
+- Background-Refresh mit konfigurierbarem Intervall
+- Optionale Twitch EventSub WebSocket-Integration
+- 31 Unit-Tests (Database + Role-Logic)
+- Docker-Support für einfaches Deployment
+
+### Architektur-Entscheidungen
+
+| Entscheidung | Begründung |
+|---|---|
+| discord.py 2.x Slash-Commands | Moderner Standard, bessere UX |
+| aiosqlite | Async-kompatibel mit discord.py event loop |
+| Discord-native Permissions | Flexibler als eigenes Admin-System |
+| Multi-Account UNIQUE Constraint | Ein User kann mehrere YT/TW Accounts haben |
+| History-Deduplizierung | Reduziert DB-Größe bei gleichbleibendem Count |
+| Token-Bucket Rate-Limiting | Respektiert API-Quotas |
+| EventSub WebSocket (optional) | Echtzeit-Updates ohne öffentliche URL |
+| Docker-Support | Einfaches Deployment mit `docker compose up` |

@@ -2,7 +2,7 @@
 
 ## Projektübersicht
 
-Discord-Bot in Python, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als Discord-Rollen anzeigt und Scoreboards pflegt. Ein Discord-User kann mehrere YouTube- und Twitch-Accounts verknüpft haben. Alle Daten werden in einer SQLite-Datenbank gespeichert.
+Discord-Bot in Python, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als Discord-Rollen anzeigt und Scoreboards pflegt. Ein Discord-User kann mehrere YouTube- und Twitch-Accounts verknüpft haben. Alle Daten werden in einer SQLite-Datenbank gespeichert. **Phase: Feature-Complete.**
 
 ## Technologie-Stack
 
@@ -11,7 +11,7 @@ Discord-Bot in Python, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt,
 - **aiosqlite** für async SQLite-Zugriff
 - **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket)
 - **tomllib** (stdlib) für die Konfigurationsdatei
-- **pytest** + **pytest-asyncio** für Unit-Tests
+- **pytest** + **pytest-asyncio** für Unit-Tests (31 Tests)
 
 ## Projektstruktur
 
@@ -23,14 +23,14 @@ Dockerfile                 # Docker-Image (python:3.11-slim)
 docker-compose.yml         # Docker-Compose für einfaches Deployment
 bot/
 ├── bot.py                 # SocialStatsBot(commands.Bot) – Haupt-Bot-Klasse
-├── database.py            # Database-Klasse – async SQLite Wrapper
+├── database.py            # Database-Klasse – async SQLite Wrapper (mit Migrationen)
 ├── roles.py               # Rollen-Erstellung, -Zuweisung, -Cleanup
-├── scoreboard.py          # Scoreboard-Embed-Erstellung & Message-Update
+├── scoreboard.py          # Scoreboard-Embed-Erstellung, Message-Update & Count-Channel-Rename
 ├── pagination.py          # PaginationView – Discord-Buttons für Seiten-Navigation
 ├── ratelimit.py           # Token-Bucket Rate-Limiter für API-Requests
 ├── cogs/
 │   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
-│   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings)
+│   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
 │   └── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap)
 └── services/
@@ -43,7 +43,6 @@ tests/
 data/
 └── bot.db                 # SQLite-Datenbank (auto-generiert)
 docs/
-├── status.md              # Entwicklungs-Fortschritt
 └── todos.md               # Offene Aufgaben
 ```
 
@@ -90,6 +89,14 @@ docs/
 - Nicht mehr benutzte Rollen werden automatisch gelöscht (`cleanup_unused_roles`)
 - Rollen-Design-Priorität: exakter Match > Bereichs-Match > Standard-Pattern
 
+### Count-Channel
+- Optionaler Voice-/Text-Channel pro Plattform, der bei jedem Refresh umbenannt wird
+- Zeigt die Gesamtzahl aller verknüpften Accounts der Plattform an
+- Settings: `yt_count_channel_id`, `tw_count_channel_id`, `yt_count_channel_pattern`, `tw_count_channel_pattern`
+- Standard-Patterns: `📺 {count} YouTube Abos` / `🎮 {count} Twitch Follower`
+- `{count}` wird durch `format_count(total)` ersetzt (Punkt-Tausendertrennung)
+- `update_count_channel()` in `bot/scoreboard.py` – wird nach jedem Refresh und force_refresh aufgerufen
+
 ### API-Services
 - `YouTubeService` und `TwitchService` in `bot/services/`
 - Beide nutzen `aiohttp.ClientSession` (lazy erstellt)
@@ -104,6 +111,7 @@ docs/
 - Optionale Keys: `dev_guild_id` (Entwicklungs-Sync), `enable_eventsub` (Echtzeit-Updates)
 - Alle anderen Einstellungen in `guild_settings`-Tabelle (per Slash-Command editierbar)
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
+- Count-Channel-Keys: `yt_count_channel_id`, `tw_count_channel_id`, `yt_count_channel_pattern`, `tw_count_channel_pattern`
 
 ## Git-Workflow
 
@@ -143,7 +151,7 @@ await cleanup_unused_roles(guild, platform)
 
 | Tabelle | Zweck |
 |---|---|
-| `guild_settings` | Pro-Guild-Konfiguration (Channels, Intervalle, Default-Patterns) |
+| `guild_settings` | Pro-Guild-Konfiguration (Channels, Intervalle, Default-Patterns, Count-Channels) |
 | `linked_accounts` | Discord-User ↔ YouTube/Twitch Mapping (multi-account, UNIQUE auf guild+user+platform+platform_id) |
 | `sub_history` | Zeitgestempelte Abo-/Follower-Snapshots (dedupliziert) |
 | `role_designs` | Benutzerdefinierte Rollen pro Bereich/exakter Zahl |
@@ -151,6 +159,5 @@ await cleanup_unused_roles(guild, platform)
 
 ## Dokumentation
 
-- Fortschritt wird in `docs/status.md` festgehalten
 - Offene Aufgaben in `docs/todos.md`
-- `README.md` enthält Setup-Anleitung und Command-Referenz
+- `README.md` enthält Setup-Anleitung, Command-Referenz und Projektstatus

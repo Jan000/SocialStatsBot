@@ -67,12 +67,16 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
             f"📺 **YouTube Refresh-Intervall:** {s['yt_refresh_interval']}s",
             f"📺 **YouTube Rollen-Pattern:** `{s['yt_default_role_pattern']}`",
             f"📺 **YouTube Rollen-Farbe:** #{s['yt_default_role_color']:06X}",
+            f"📺 **YouTube Zähler-Kanal:** {ch(s.get('yt_count_channel_id', 0))}",
+            f"📺 **YouTube Zähler-Pattern:** `{s.get('yt_count_channel_pattern', '📺 {count} YouTube Abos')}`",
             "",
             f"🎮 **Twitch Scoreboard-Kanal:** {ch(s['tw_scoreboard_channel_id'])}",
             f"🎮 **Twitch Scoreboard-Größe:** {s['tw_scoreboard_size']}",
             f"🎮 **Twitch Refresh-Intervall:** {s['tw_refresh_interval']}s",
             f"🎮 **Twitch Rollen-Pattern:** `{s['tw_default_role_pattern']}`",
             f"🎮 **Twitch Rollen-Farbe:** #{s['tw_default_role_color']:06X}",
+            f"🎮 **Twitch Zähler-Kanal:** {ch(s.get('tw_count_channel_id', 0))}",
+            f"🎮 **Twitch Zähler-Pattern:** `{s.get('tw_count_channel_pattern', '🎮 {count} Twitch Follower')}`",
         ]
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
@@ -219,6 +223,67 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         await self.bot.db.update_guild_setting(interaction.guild_id, key, color_int)
         await interaction.response.send_message(
             f"✅ {platform.name} Rollenfarbe auf `#{color_int:06X}` gesetzt.",
+            ephemeral=True,
+        )
+
+    # ── /settings count_channel ─────────────────────────────────────
+
+    @app_commands.command(
+        name="count_channel",
+        description="Setzt den Zähler-Kanal, dessen Name bei jedem Refresh aktualisiert wird.",
+    )
+    @app_commands.describe(platform="Plattform", channel="Voice- oder Text-Kanal")
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def count_channel(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str],
+        channel: discord.abc.GuildChannel,
+    ) -> None:
+        key = f"{'yt' if platform.value == 'youtube' else 'tw'}_count_channel_id"
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, channel.id)
+        await interaction.response.send_message(
+            f"✅ {platform.name} Zähler-Kanal auf {channel.mention} gesetzt.\n"
+            "Der Kanalname wird bei jeder Aktualisierung umbenannt.",
+            ephemeral=True,
+        )
+
+    # ── /settings count_channel_pattern ──────────────────────────────
+
+    @app_commands.command(
+        name="count_channel_pattern",
+        description="Setzt das Namens-Pattern für den Zähler-Kanal. Platzhalter: {count}",
+    )
+    @app_commands.describe(
+        platform="Plattform",
+        pattern="Pattern mit {count} (z.B. '📺 {count} YouTube Abos')",
+    )
+    @app_commands.choices(
+        platform=[
+            app_commands.Choice(name="YouTube", value="youtube"),
+            app_commands.Choice(name="Twitch", value="twitch"),
+        ]
+    )
+    async def count_channel_pattern(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str],
+        pattern: str,
+    ) -> None:
+        if "{count}" not in pattern:
+            await interaction.response.send_message(
+                "❌ Pattern muss `{count}` enthalten.", ephemeral=True
+            )
+            return
+        key = f"{'yt' if platform.value == 'youtube' else 'tw'}_count_channel_pattern"
+        await self.bot.db.update_guild_setting(interaction.guild_id, key, pattern)
+        await interaction.response.send_message(
+            f"✅ {platform.name} Zähler-Pattern auf `{pattern}` gesetzt.",
             ephemeral=True,
         )
 

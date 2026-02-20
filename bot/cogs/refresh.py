@@ -15,7 +15,7 @@ from bot.roles import (
     update_member_role,
     cleanup_unused_roles,
 )
-from bot.scoreboard import update_scoreboard
+from bot.scoreboard import update_count_channel, update_scoreboard
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +94,7 @@ class RefreshCog(commands.Cog):
             if any_updated:
                 await cleanup_unused_roles(guild, platform)
                 await update_scoreboard(self.bot, guild, platform, settings)
+                await update_count_channel(self.bot, guild, platform, settings)
 
     async def _fetch_count(self, platform: str, account: dict) -> int | None:
         if platform == "youtube":

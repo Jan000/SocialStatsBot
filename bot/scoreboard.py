@@ -226,3 +226,42 @@ async def update_scoreboard(
     await bot.db.set_scoreboard_message_ids(
         guild.id, platform, channel_id, new_ids
     )
+
+
+async def update_count_channel(
+    bot,
+    guild: discord.Guild,
+    platform: str,
+    settings: dict,
+) -> None:
+    """Rename the count-display channel to reflect the current total.
+
+    The channel name is built from the guild's count_channel_pattern
+    with ``{count}`` replaced by the formatted total.
+    """
+    prefix = "yt" if platform == "youtube" else "tw"
+    channel_id = settings.get(f"{prefix}_count_channel_id", 0)
+    if not channel_id:
+        return
+
+    channel = guild.get_channel(channel_id)
+    if channel is None:
+        return
+
+    accounts = await bot.db.get_all_linked(guild.id, platform)
+    total = sum(a["current_count"] for a in accounts)
+
+    pattern = settings.get(
+        f"{prefix}_count_channel_pattern",
+        f"{'📺' if platform == 'youtube' else '🎮'} {{count}} {'YouTube Abos' if platform == 'youtube' else 'Twitch Follower'}",
+    )
+    new_name = pattern.replace("{count}", format_count(total))
+
+    if channel.name != new_name:
+        try:
+            await channel.edit(name=new_name)
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            log.error(
+                "Cannot rename count channel %s in guild %s: %s",
+                channel_id, guild.id, exc,
+            )

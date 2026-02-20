@@ -33,7 +33,11 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     yt_default_role_pattern    TEXT    DEFAULT '{name} - {count} Abos',
     tw_default_role_pattern    TEXT    DEFAULT '{name} - {count} Follower',
     yt_default_role_color      INTEGER DEFAULT 16711680,
-    tw_default_role_color      INTEGER DEFAULT 6570404
+    tw_default_role_color      INTEGER DEFAULT 6570404,
+    yt_count_channel_id        INTEGER DEFAULT 0,
+    tw_count_channel_id        INTEGER DEFAULT 0,
+    yt_count_channel_pattern   TEXT    DEFAULT '📺 {count} YouTube Abos',
+    tw_count_channel_pattern   TEXT    DEFAULT '🎮 {count} Twitch Follower'
 );
 
 CREATE TABLE IF NOT EXISTS linked_accounts (
@@ -150,6 +154,22 @@ class Database:
                 "ON sub_history(guild_id, discord_user_id, platform, platform_id)"
             )
 
+            # Migration: add count_channel columns to guild_settings if missing
+            async with self.db.execute("PRAGMA table_info(guild_settings)") as cur:
+                gs_cols = {row[1] for row in await cur.fetchall()}
+            for col, default in [
+                ("yt_count_channel_id", "INTEGER DEFAULT 0"),
+                ("tw_count_channel_id", "INTEGER DEFAULT 0"),
+                ("yt_count_channel_pattern", "TEXT DEFAULT '📺 {count} YouTube Abos'"),
+                ("tw_count_channel_pattern", "TEXT DEFAULT '🎮 {count} Twitch Follower'"),
+            ]:
+                if col not in gs_cols:
+                    log.info("Adding %s column to guild_settings...", col)
+                    await self.db.execute(
+                        f"ALTER TABLE guild_settings ADD COLUMN {col} {default}"
+                    )
+            await self.db.commit()
+
             # Migration: update default role patterns from old format
             await self.db.execute("""
                 UPDATE guild_settings
@@ -203,6 +223,10 @@ class Database:
             "tw_default_role_pattern",
             "yt_default_role_color",
             "tw_default_role_color",
+            "yt_count_channel_id",
+            "tw_count_channel_id",
+            "yt_count_channel_pattern",
+            "tw_count_channel_pattern",
         }
         if key not in allowed:
             raise ValueError(f"Unknown setting: {key}")

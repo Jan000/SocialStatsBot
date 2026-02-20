@@ -7,14 +7,16 @@ built-in permission system (default_permissions).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
+import sys
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.bot import SocialStatsBot
+from bot.bot import EXIT_CODE_UPDATE, SocialStatsBot
 from bot.roles import (
     compute_role_name_and_color,
     update_member_role,
@@ -426,6 +428,33 @@ class AdminCog(commands.GroupCog, group_name="admin"):
                 await interaction.response.send_message(msg, ephemeral=True)
             else:
                 await interaction.followup.send(msg, ephemeral=True)
+
+    # ── /admin update ────────────────────────────────────────────────
+
+    @app_commands.command(
+        name="update",
+        description="Aktualisiert den Bot (git pull + rebuild). Nur für den Bot-Owner.",
+    )
+    async def update(self, interaction: discord.Interaction) -> None:
+        # Only the application owner may trigger an update.
+        app_info = await self.bot.application_info()
+        if interaction.user.id != app_info.owner.id:
+            await interaction.response.send_message(
+                "❌ Nur der Bot-Owner darf ein Update auslösen.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            "🔄 Update wird gestartet … der Bot fährt jetzt herunter und wird vom Host-Skript neu gebaut.",
+            ephemeral=True,
+        )
+        log.info("Update requested by %s – shutting down with exit code %d.", interaction.user, EXIT_CODE_UPDATE)
+
+        # Give Discord a moment to deliver the response, then exit.
+        await asyncio.sleep(2)
+        await self.bot.close()
+        sys.exit(EXIT_CODE_UPDATE)
 
 
 async def setup(bot: SocialStatsBot) -> None:

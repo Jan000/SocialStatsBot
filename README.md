@@ -39,10 +39,18 @@ Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als D
 ### Docker
 
 ```bash
-docker compose up -d
+# Einmaliger Start:
+docker compose up -d --build
+
+# Mit Auto-Update-Support (empfohlen):
+./update.sh
 ```
 
 `data/`-Verzeichnis und `config.toml` werden als Volumes gemountet.
+
+Das Wrapper-Skript `update.sh` startet den Bot und wartet auf Exit-Code 42.
+Wird `/admin update` in Discord ausgeführt, fährt der Bot herunter, das Skript
+pullt die neueste Version und baut den Container automatisch neu.
 
 ### Optionale Konfiguration
 
@@ -62,6 +70,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 | `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen (paginiert) |
 | `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |
 | `/admin history <user> <platform> <account_name>` | Abo-/Follower-Verlauf anzeigen (Autocomplete, paginiert) |
+| `/admin update` | Bot aktualisieren (git pull + rebuild). Nur Bot-Owner. |
 
 ### Statistik-Commands (`/stats ...`)
 | Command | Beschreibung |

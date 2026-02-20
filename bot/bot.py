@@ -15,6 +15,9 @@ from bot.services.eventsub import TwitchEventSub
 
 log = logging.getLogger(__name__)
 
+# Special exit code that signals the host wrapper to run an update.
+EXIT_CODE_UPDATE = 42
+
 
 class SocialStatsBot(commands.Bot):
     """Discord bot that tracks YouTube subscribers and Twitch followers."""

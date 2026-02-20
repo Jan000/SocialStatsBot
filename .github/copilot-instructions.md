@@ -74,6 +74,12 @@ docs/
 - Alle anderen Einstellungen in `guild_settings`-Tabelle (per Slash-Command editierbar)
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
 
+## Git-Workflow
+
+- **Nach jeder Änderung** einen Git-Commit erstellen
+- Commit-Messages auf Englisch im Conventional-Commits-Format: `feat:`, `fix:`, `docs:`, `refactor:`, etc.
+- Zusammengehörige Änderungen in einem Commit bündeln
+
 ## Code-Style
 
 - Type Hints überall (`from __future__ import annotations`)

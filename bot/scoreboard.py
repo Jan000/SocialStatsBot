@@ -30,16 +30,8 @@ COUNT_LABEL = {
 }
 
 PLATFORM_THUMBNAIL = {
-    "youtube": (
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/"
-        "0/09/YouTube_full-color_icon_%282017%29.svg/"
-        "200px-YouTube_full-color_icon_%282017%29.svg.png"
-    ),
-    "twitch": (
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/"
-        "d/d3/Twitch_Glitch_Logo_Purple.svg/"
-        "200px-Twitch_Glitch_Logo_Purple.svg.png"
-    ),
+    "youtube": "https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg",
+    "twitch": "https://assets.twitch.tv/assets/favicon-32-e29e246c157142c94346.png",
 }
 
 # Discord hard-limit for a single embed description.
@@ -57,20 +49,29 @@ def _format_interval(seconds: int) -> str:
     return f"{seconds} Sekunde" if seconds == 1 else f"{seconds} Sekunden"
 
 
+def _timestamp_block(now_ts: int, next_ts: int, interval: int) -> str:
+    """Return the update-info block to append to an embed description."""
+    interval_label = _format_interval(interval)
+    return (
+        "\n\n─────────────────────────\n"
+        f"🕐 Aktualisiert: <t:{now_ts}:f>\n"
+        f"⏭️ Nächste Aktualisierung: <t:{next_ts}:R> ({interval_label})"
+    )
+
+
 def _apply_embed_chrome(
     embed: discord.Embed,
     platform: str,
-    now: datetime.datetime,
+    now_ts: int,
     next_ts: int,
     interval: int,
 ) -> None:
-    """Set thumbnail, footer and timestamp on *embed* (mutates in-place)."""
+    """Set thumbnail and append timestamp block on *embed* (mutates in-place)."""
     thumb = PLATFORM_THUMBNAIL.get(platform)
     if thumb:
         embed.set_thumbnail(url=thumb)
-    interval_label = _format_interval(interval)
-    embed.set_footer(text=f"Nächste Aktualisierung: <t:{next_ts}:R> ({interval_label})")
-    embed.timestamp = now
+    # Append timestamp block to description (footer can't render <t:…:R>)
+    embed.description = (embed.description or "") + _timestamp_block(now_ts, next_ts, interval)
 
 
 async def build_scoreboard_embeds(
@@ -104,7 +105,7 @@ async def build_scoreboard_embeds(
             colour=colour,
             description="Noch keine Accounts verknüpft.",
         )
-        _apply_embed_chrome(embed, platform, now, next_ts, interval)
+        _apply_embed_chrome(embed, platform, now_ts, next_ts, interval)
         return [embed]
 
     # ── Summary line ─────────────────────────────────────────────
@@ -124,22 +125,27 @@ async def build_scoreboard_embeds(
         account_info = f" ({pname})" if pname else ""
         lines.append(f"{rank} {display_name}{account_info} – **{count_str}** {c_label}")
 
+    # ── Timestamp block ──────────────────────────────────────────
+    ts_block = _timestamp_block(now_ts, next_ts, interval)
+
     # ── Try to fit everything into a single embed ────────────────
     ranking_text = "\n".join(lines)
-    full_desc = f"{summary}\n{ranking_text}"
+    full_desc = f"{summary}\n{ranking_text}{ts_block}"
     if len(full_desc) <= _MAX_DESCRIPTION:
         embed = discord.Embed(
             title=f"{emoji}  {label} Scoreboard",
             colour=colour,
             description=full_desc,
         )
-        _apply_embed_chrome(embed, platform, now, next_ts, interval)
+        thumb = PLATFORM_THUMBNAIL.get(platform)
+        if thumb:
+            embed.set_thumbnail(url=thumb)
         return [embed]
 
     # ── Split into two embeds ────────────────────────────────────
     mid = len(lines) // 2
     desc1 = f"{summary}\n" + "\n".join(lines[:mid])
-    desc2 = "\n".join(lines[mid:])
+    desc2 = "\n".join(lines[mid:]) + ts_block
 
     # Safety: if even the second half exceeds the limit, truncate
     if len(desc2) > _MAX_DESCRIPTION:
@@ -150,13 +156,14 @@ async def build_scoreboard_embeds(
         colour=colour,
         description=desc1,
     )
-    embed1.set_thumbnail(url=PLATFORM_THUMBNAIL.get(platform, ""))
+    thumb = PLATFORM_THUMBNAIL.get(platform)
+    if thumb:
+        embed1.set_thumbnail(url=thumb)
     embed2 = discord.Embed(
         title=f"{emoji}  {label} Scoreboard (2/2)",
         colour=colour,
         description=desc2,
     )
-    _apply_embed_chrome(embed2, platform, now, next_ts, interval)
     return [embed1, embed2]
 
 

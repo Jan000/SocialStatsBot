@@ -51,8 +51,8 @@ docs/
 
 ### Bot-Klasse
 - `SocialStatsBot` erbt von `commands.Bot` und trägt alle shared resources: `db`, `youtube`, `twitch`
-- **Kein eigenes Permission-System** – Berechtigungen werden über Discords `default_permissions(administrator=True)` gesteuert
-- Server-Admins können Command-Zugriffe in Server-Einstellungen > Integrationen konfigurieren
+- **Kein eigenes Permission-System** – keine `default_permissions`-Einschränkung auf den Commands
+- Server-Admins konfigurieren Command-Zugriffe ausschließlich über Server-Einstellungen > Integrationen
 - Cogs werden in `setup_hook()` geladen
 
 ### Datenbank
@@ -75,7 +75,7 @@ docs/
 
 ### Slash-Commands
 - Alle Commands nutzen `@app_commands.command()` (discord.py 2.x Slash-Commands)
-- Admin-Einschränkung über `@app_commands.default_permissions(administrator=True)` auf GroupCog-Ebene
+- **Keine `default_permissions`** – alle Commands sind standardmäßig sichtbar; Einschränkung über Discord-Integrationseinstellungen
 - Plattform-Auswahl über `@app_commands.choices(platform=[...])` mit `youtube`/`twitch`
 - **Autocomplete** für Account-Namen (`account_name`) und Rollen-Design-IDs (`design_id`)
 - Autocomplete-Methode `_account_autocomplete` liest `interaction.namespace.user` + `interaction.namespace.platform`
@@ -123,8 +123,7 @@ docs/
 ## Wichtige Patterns
 
 ```python
-# Permission via Discord (auf GroupCog-Ebene)
-@app_commands.default_permissions(administrator=True)
+# Keine default_permissions – Discord regelt den Zugriff
 class AdminCog(commands.GroupCog, group_name="admin"):
     ...
 

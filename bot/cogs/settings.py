@@ -18,7 +18,6 @@ from bot.bot import SocialStatsBot
 log = logging.getLogger(__name__)
 
 
-@app_commands.default_permissions(administrator=True)
 class SettingsCog(commands.GroupCog, group_name="settings"):
     """Commands to configure bot settings per guild."""
 

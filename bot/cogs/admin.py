@@ -27,7 +27,6 @@ from bot.pagination import PaginationView, paginate_lines
 log = logging.getLogger(__name__)
 
 
-@app_commands.default_permissions(administrator=True)
 class AdminCog(commands.GroupCog, group_name="admin"):
     """Admin commands for managing linked accounts."""
 

@@ -92,7 +92,7 @@ async def build_scoreboard_embeds(
     interval_label = _format_interval(interval)
     timestamp_block = (
         "\n\n─────────────────────────\n"
-        f"🕐 Aktualisiert: <t:{now_ts}:R>\n"
+        f"🕐 Aktualisiert: <t:{now_ts}:f>\n"
         f"⏭️ Nächste Aktualisierung: <t:{next_ts}:R> ({interval_label})"
     )
 

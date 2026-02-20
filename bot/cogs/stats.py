@@ -26,7 +26,6 @@ PERIOD_CHOICES = [
 ]
 
 
-@app_commands.default_permissions(administrator=True)
 class StatsCog(commands.GroupCog, group_name="stats"):
     """Statistics and growth visualisation commands."""
 

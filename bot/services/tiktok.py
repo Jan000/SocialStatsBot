@@ -6,6 +6,7 @@ Uses a public endpoint that does not require API keys.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -19,12 +20,15 @@ log = logging.getLogger(__name__)
 _TT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
+    "Chrome/131.0.0.0 Safari/537.36"
 )
 
 # Conservative rate limit for TikTok.
 _DEFAULT_TT_MAX_CALLS = 2
 _DEFAULT_TT_PERIOD = 5.0
+
+# Number of retries on HTTP 429 (rate-limited) responses.
+_MAX_429_RETRIES = 3
 
 # Patterns for parsing TikTok input
 _TT_URL_RE = re.compile(
@@ -80,29 +84,51 @@ class TikTokService:
 
         Returns dict with id, username, nickname, follower_count
         or None on error.
+
+        Raises :class:`PlatformRateLimitError` when the API keeps returning
+        429 after all retry attempts.
         """
+        from bot.cogs import PlatformRateLimitError
+
         session = await self._get_session()
         # TikTok embeds user data in the SSR __UNIVERSAL_DATA_FOR_REHYDRATION__
         # on the profile page.  We fetch it with accept: text/html and parse.
         url = f"https://www.tiktok.com/@{username}"
-        try:
-            async with self._rate_limiter:
-                async with session.get(
-                    url,
-                    headers={"Accept": "text/html"},
-                    allow_redirects=True,
-                ) as resp:
-                    if resp.status != 200:
-                        log.warning(
-                            "TikTok returned %s for user %s",
-                            resp.status, username,
-                        )
-                        return None
-                    html = await resp.text()
-                    return self._parse_profile(html, username)
-        except Exception:
-            log.exception("TikTok error for user %s", username)
-            return None
+        for attempt in range(_MAX_429_RETRIES + 1):
+            try:
+                async with self._rate_limiter:
+                    async with session.get(
+                        url,
+                        headers={"Accept": "text/html"},
+                        allow_redirects=True,
+                    ) as resp:
+                        if resp.status == 429:
+                            if attempt < _MAX_429_RETRIES:
+                                wait = min(2 ** (attempt + 1), 30)
+                                log.warning(
+                                    "TikTok 429 for %s \u2013 retry %d/%d in %ds",
+                                    username, attempt + 1, _MAX_429_RETRIES, wait,
+                                )
+                                await asyncio.sleep(wait)
+                                continue
+                            log.warning(
+                                "TikTok 429 for %s \u2013 retries exhausted", username
+                            )
+                            raise PlatformRateLimitError("tiktok", username)
+                        if resp.status != 200:
+                            log.warning(
+                                "TikTok returned %s for user %s",
+                                resp.status, username,
+                            )
+                            return None
+                        html = await resp.text()
+                        return self._parse_profile(html, username)
+            except PlatformRateLimitError:
+                raise
+            except Exception:
+                log.exception("TikTok error for user %s", username)
+                return None
+        return None  # pragma: no cover \u2013 loop always returns or raises
 
     # Match both SIGI_STATE and UNIVERSAL_DATA hydration scripts
     _JSON_RE = re.compile(

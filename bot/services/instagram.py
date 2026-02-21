@@ -6,6 +6,7 @@ Uses the public web profile endpoint (no API key required).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -21,12 +22,15 @@ _IG_WEB_PROFILE = "https://www.instagram.com/api/v1/users/web_profile_info/"
 _IG_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
+    "Chrome/131.0.0.0 Safari/537.36"
 )
 
 # Conservative rate limit – Instagram is strict about scraping.
 _DEFAULT_IG_MAX_CALLS = 2
 _DEFAULT_IG_PERIOD = 5.0
+
+# Number of retries on HTTP 429 (rate-limited) responses.
+_MAX_429_RETRIES = 3
 
 # Patterns for parsing Instagram input
 _IG_URL_RE = re.compile(
@@ -82,39 +86,61 @@ class InstagramService:
 
         Returns dict with id, username, full_name, follower_count
         or None on error.
+
+        Raises :class:`PlatformRateLimitError` when the API keeps returning
+        429 after all retry attempts.
         """
+        from bot.cogs import PlatformRateLimitError
+
         session = await self._get_session()
         params = {"username": username}
         headers = {
             "X-IG-App-ID": "936619743392459",  # public web app ID
             "Referer": f"https://www.instagram.com/{username}/",
         }
-        try:
-            async with self._rate_limiter:
-                async with session.get(
-                    _IG_WEB_PROFILE, params=params, headers=headers
-                ) as resp:
-                    if resp.status != 200:
-                        log.warning(
-                            "Instagram API returned %s for user %s",
-                            resp.status, username,
-                        )
-                        return None
-                    data = await resp.json()
-                    user = data.get("data", {}).get("user")
-                    if not user:
-                        return None
-                    return {
-                        "id": user.get("id", ""),
-                        "username": user.get("username", username),
-                        "full_name": user.get("full_name", ""),
-                        "follower_count": user.get("edge_followed_by", {}).get(
-                            "count", 0
-                        ),
-                    }
-        except Exception:
-            log.exception("Instagram API error for user %s", username)
-            return None
+        for attempt in range(_MAX_429_RETRIES + 1):
+            try:
+                async with self._rate_limiter:
+                    async with session.get(
+                        _IG_WEB_PROFILE, params=params, headers=headers
+                    ) as resp:
+                        if resp.status == 429:
+                            if attempt < _MAX_429_RETRIES:
+                                wait = min(2 ** (attempt + 1), 30)
+                                log.warning(
+                                    "Instagram 429 for %s – retry %d/%d in %ds",
+                                    username, attempt + 1, _MAX_429_RETRIES, wait,
+                                )
+                                await asyncio.sleep(wait)
+                                continue
+                            log.warning(
+                                "Instagram 429 for %s – retries exhausted", username
+                            )
+                            raise PlatformRateLimitError("instagram", username)
+                        if resp.status != 200:
+                            log.warning(
+                                "Instagram API returned %s for user %s",
+                                resp.status, username,
+                            )
+                            return None
+                        data = await resp.json()
+                        user = data.get("data", {}).get("user")
+                        if not user:
+                            return None
+                        return {
+                            "id": user.get("id", ""),
+                            "username": user.get("username", username),
+                            "full_name": user.get("full_name", ""),
+                            "follower_count": user.get("edge_followed_by", {}).get(
+                                "count", 0
+                            ),
+                        }
+            except PlatformRateLimitError:
+                raise
+            except Exception:
+                log.exception("Instagram API error for user %s", username)
+                return None
+        return None  # pragma: no cover – loop always returns or raises
 
     async def get_follower_count(self, username: str) -> Optional[int]:
         """Return the follower count for an Instagram username."""

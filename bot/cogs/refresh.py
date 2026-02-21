@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands, tasks
 
 from bot.bot import SocialStatsBot
-from bot.cogs import fetch_count
+from bot.cogs import PlatformRateLimitError, fetch_count
 from bot.database import ALL_PLATFORMS
 from bot.roles import (
     compute_role_name_and_color,
@@ -69,7 +69,14 @@ class RefreshCog(commands.Cog):
 
             any_updated = False
             for acc in accounts:
-                count = await fetch_count(self.bot, platform, acc)
+                try:
+                    count = await fetch_count(self.bot, platform, acc)
+                except PlatformRateLimitError:
+                    log.warning(
+                        "Rate-limited fetching %s account %s (%s) in guild %s",
+                        platform, acc["platform_name"], acc["platform_id"], guild.id,
+                    )
+                    continue
                 if count is None:
                     log.warning(
                         "API error for %s account %s (%s) in guild %s",

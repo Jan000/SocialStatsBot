@@ -1,4 +1,4 @@
-"""Cogs package for the bot – shared constants and helpers."""
+"""Cogs package for the bot – shared constants, helpers, and exceptions."""
 
 from __future__ import annotations
 
@@ -9,6 +9,21 @@ from discord import app_commands
 
 if TYPE_CHECKING:
     from bot.bot import SocialStatsBot
+
+
+# ── Exceptions ────────────────────────────────────────────────────────
+
+
+class PlatformRateLimitError(Exception):
+    """Raised when a platform API keeps returning 429 after all retries."""
+
+    def __init__(self, platform: str, identifier: str) -> None:
+        self.platform = platform
+        self.identifier = identifier
+        super().__init__(
+            f"{platform} rate-limited for {identifier}"
+        )
+
 
 # ── Platform choices (reused across all cogs) ────────────────────────
 PLATFORM_CHOICES = [

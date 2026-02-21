@@ -24,6 +24,7 @@ from bot.cogs import (
     PLATFORM_COLOUR_INT,
     PLATFORM_DISPLAY_NAME,
     PLATFORM_EMOJI,
+    PlatformRateLimitError,
     detect_platform_from_url,
     fetch_count,
     resolve_platform,
@@ -109,7 +110,15 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             plat_key = detected
             plat_display = PLATFORM_DISPLAY_NAME[detected]
 
-        info = await resolve_platform(self.bot, plat_key, channel_input)
+        try:
+            info = await resolve_platform(self.bot, plat_key, channel_input)
+        except PlatformRateLimitError:
+            await interaction.followup.send(
+                f"\u23f3 {plat_display} ist vor\u00fcbergehend nicht erreichbar (Rate-Limit). "
+                "Bitte versuche es sp\u00e4ter erneut.",
+                ephemeral=True,
+            )
+            return
         if info is None:
             await interaction.followup.send(
                 f"❌ Konnte den {plat_display}-Kanal nicht finden. Prüfe die Eingabe.",

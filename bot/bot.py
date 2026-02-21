@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import discord
@@ -119,3 +122,70 @@ class SocialStatsBot(commands.Bot):
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (ID: %s)", self.user, self.user.id if self.user else "?")
+        await self._report_update_result()
+
+    # ── Update result reporting ──────────────────────────────────────
+
+    async def _report_update_result(self) -> None:
+        """If a pending update exists, report success/failure to Discord."""
+        pending_path = Path("data/pending_update.json")
+        if not pending_path.exists():
+            return
+
+        try:
+            pending = json.loads(pending_path.read_text(encoding="utf-8"))
+            channel_id: int = pending["channel_id"]
+            user_id: int = pending["user_id"]
+            requested_at: str = pending.get("requested_at", "?")
+        except (json.JSONDecodeError, KeyError, OSError) as exc:
+            log.warning("Could not read pending_update.json: %s", exc)
+            pending_path.unlink(missing_ok=True)
+            return
+
+        # Read the update log written by the host wrapper script.
+        log_path = Path("data/update.log")
+        log_text = ""
+        has_error = False
+        if log_path.exists():
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="replace")
+                has_error = "EXIT=error" in log_text
+                # Remove the internal marker from the display text.
+                log_text = log_text.replace("EXIT=error\n", "").replace("EXIT=error", "")
+            except OSError as exc:
+                log_text = f"(Log konnte nicht gelesen werden: {exc})"
+                has_error = True
+
+        # Build the embed.
+        if has_error:
+            colour = discord.Colour.red()
+            title = "❌ Update mit Fehlern abgeschlossen"
+        else:
+            colour = discord.Colour.green()
+            title = "✅ Update erfolgreich"
+
+        embed = discord.Embed(title=title, colour=colour)
+        embed.add_field(
+            name="Angefordert von",
+            value=f"<@{user_id}> um {requested_at}",
+            inline=False,
+        )
+
+        if log_text.strip():
+            # Discord embed field limit is 1024, description limit is 4096.
+            # Put the log into the description for more room.
+            truncated = log_text.strip()
+            if len(truncated) > 3900:
+                truncated = truncated[:3900] + "\n… (gekürzt)"
+            embed.description = f"```\n{truncated}\n```"
+
+        try:
+            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+            await channel.send(embed=embed)  # type: ignore[union-attr]
+            log.info("Posted update result to channel %s.", channel_id)
+        except Exception as exc:
+            log.warning("Could not post update result to channel %s: %s", channel_id, exc)
+
+        # Clean up both files.
+        pending_path.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)

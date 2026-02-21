@@ -8,8 +8,10 @@ built-in permission system (default_permissions).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -436,10 +438,21 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     )
     async def update(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
-            "🔄 Update wird gestartet … der Bot fährt jetzt herunter und wird vom Host-Skript neu gebaut.",
+            "🔄 Update wird gestartet … der Bot fährt jetzt herunter und wird vom Host-Skript neu gebaut.\n"
+            "Nach dem Neustart wird das Ergebnis hier gepostet.",
             ephemeral=True,
         )
         log.info("Update requested by %s – shutting down with exit code %d.", interaction.user, EXIT_CODE_UPDATE)
+
+        # Save context so the bot can report back after restart.
+        pending = {
+            "channel_id": interaction.channel_id,
+            "user_id": interaction.user.id,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        pending_path = Path("data/pending_update.json")
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        pending_path.write_text(json.dumps(pending), encoding="utf-8")
 
         # Set the exit code on the bot so main.py can propagate it, then shut down.
         self.bot.exit_code = EXIT_CODE_UPDATE

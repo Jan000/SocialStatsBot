@@ -432,18 +432,9 @@ class AdminCog(commands.GroupCog, group_name="admin"):
 
     @app_commands.command(
         name="update",
-        description="Aktualisiert den Bot (git pull + rebuild). Nur für den Bot-Owner.",
+        description="Aktualisiert den Bot (git pull + rebuild).",
     )
     async def update(self, interaction: discord.Interaction) -> None:
-        # Only the application owner may trigger an update.
-        app_info = await self.bot.application_info()
-        if interaction.user.id != app_info.owner.id:
-            await interaction.response.send_message(
-                "❌ Nur der Bot-Owner darf ein Update auslösen.",
-                ephemeral=True,
-            )
-            return
-
         await interaction.response.send_message(
             "🔄 Update wird gestartet … der Bot fährt jetzt herunter und wird vom Host-Skript neu gebaut.",
             ephemeral=True,

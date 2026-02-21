@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-import sys
 
 import discord
 from discord import app_commands
@@ -451,10 +450,10 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         )
         log.info("Update requested by %s – shutting down with exit code %d.", interaction.user, EXIT_CODE_UPDATE)
 
-        # Give Discord a moment to deliver the response, then exit.
+        # Set the exit code on the bot so main.py can propagate it, then shut down.
+        self.bot.exit_code = EXIT_CODE_UPDATE
         await asyncio.sleep(2)
         await self.bot.close()
-        sys.exit(EXIT_CODE_UPDATE)
 
 
 async def setup(bot: SocialStatsBot) -> None:

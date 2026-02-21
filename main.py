@@ -46,6 +46,9 @@ def main() -> None:
     )
     bot.run(bot_token, log_handler=None)
 
+    # Propagate special exit codes (e.g. 42 for update) to the host.
+    sys.exit(bot.exit_code)
+
 
 if __name__ == "__main__":
     main()

@@ -27,6 +27,7 @@ class SocialStatsBot(commands.Bot):
     twitch: TwitchService
     eventsub: TwitchEventSub | None
     dev_guild_id: int | None
+    exit_code: int  # set to EXIT_CODE_UPDATE for update-then-restart
 
     def __init__(
         self,
@@ -47,6 +48,7 @@ class SocialStatsBot(commands.Bot):
         self.dev_guild_id = dev_guild_id
         self._enable_eventsub = enable_eventsub
         self.eventsub = None
+        self.exit_code = 0
 
     async def setup_hook(self) -> None:
         log.info("Connecting to database …")

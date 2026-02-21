@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import aiohttp
 import discord
 from discord.ext import commands
 
@@ -127,14 +128,17 @@ class SocialStatsBot(commands.Bot):
     # ── Update result reporting ──────────────────────────────────────
 
     async def _report_update_result(self) -> None:
-        """If a pending update exists, report success/failure to Discord."""
+        """If a pending update exists, report success/failure via the interaction webhook."""
+        import re
+
         pending_path = Path("data/pending_update.json")
         if not pending_path.exists():
             return
 
         try:
             pending = json.loads(pending_path.read_text(encoding="utf-8"))
-            channel_id: int = pending["channel_id"]
+            app_id: int = pending["application_id"]
+            token: str = pending["interaction_token"]
             user_id: int = pending["user_id"]
             requested_at: str = pending.get("requested_at", "?")
         except (json.JSONDecodeError, KeyError, OSError) as exc:
@@ -148,10 +152,12 @@ class SocialStatsBot(commands.Bot):
         has_error = False
         if log_path.exists():
             try:
-                log_text = log_path.read_text(encoding="utf-8", errors="replace")
-                has_error = "EXIT=error" in log_text
-                # Remove the internal marker from the display text.
-                log_text = log_text.replace("EXIT=error\n", "").replace("EXIT=error", "")
+                raw = log_path.read_text(encoding="utf-8", errors="replace")
+                has_error = "EXIT=error" in raw
+                # Strip internal marker + ANSI escape codes.
+                cleaned = raw.replace("EXIT=error\n", "").replace("EXIT=error", "")
+                log_text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", cleaned)
+                log_text = re.sub(r"[^\n]*\r(?!\n)", "", log_text)
             except OSError as exc:
                 log_text = f"(Log konnte nicht gelesen werden: {exc})"
                 has_error = True
@@ -159,33 +165,62 @@ class SocialStatsBot(commands.Bot):
         # Build the embed.
         if has_error:
             colour = discord.Colour.red()
-            title = "❌ Update mit Fehlern abgeschlossen"
+            title = "\u274c Update mit Fehlern abgeschlossen"
         else:
             colour = discord.Colour.green()
-            title = "✅ Update erfolgreich"
+            title = "\u2705 Update erfolgreich"
 
         embed = discord.Embed(title=title, colour=colour)
+
+        # Show a relative-time Discord timestamp if possible.
+        try:
+            dt = datetime.fromisoformat(requested_at)
+            ts_str = f"<t:{int(dt.timestamp())}:R>"
+        except (ValueError, OSError):
+            ts_str = requested_at
         embed.add_field(
             name="Angefordert von",
-            value=f"<@{user_id}> um {requested_at}",
+            value=f"<@{user_id}> \u00b7 {ts_str}",
             inline=False,
         )
 
         if log_text.strip():
-            # Discord embed field limit is 1024, description limit is 4096.
-            # Put the log into the description for more room.
             truncated = log_text.strip()
             if len(truncated) > 3900:
-                truncated = truncated[:3900] + "\n… (gekürzt)"
+                truncated = truncated[:3900] + "\n\u2026 (gek\u00fcrzt)"
             embed.description = f"```\n{truncated}\n```"
 
+        # ── Try to edit the original ephemeral message via webhook ────
+        webhook_url = (
+            f"https://discord.com/api/v10/webhooks/{app_id}/{token}"
+            f"/messages/@original"
+        )
+        posted = False
         try:
-            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
-            await channel.send(embed=embed)  # type: ignore[union-attr]
-            log.info("Posted update result to channel %s.", channel_id)
+            async with aiohttp.ClientSession() as session:
+                payload = {"content": "", "embeds": [embed.to_dict()]}
+                async with session.patch(webhook_url, json=payload) as resp:
+                    if resp.status < 300:
+                        posted = True
+                        log.info("Edited original interaction with update result.")
+                    else:
+                        body = await resp.text()
+                        log.warning(
+                            "Webhook PATCH returned %s – token may have expired: %s",
+                            resp.status, body[:200],
+                        )
         except Exception as exc:
-            log.warning("Could not post update result to channel %s: %s", channel_id, exc)
+            log.warning("Could not edit interaction via webhook: %s", exc)
 
-        # Clean up both files.
+        # Fallback: DM the user if the webhook token already expired.
+        if not posted:
+            try:
+                user = self.get_user(user_id) or await self.fetch_user(user_id)
+                await user.send(embed=embed)
+                log.info("Sent update result via DM to user %s.", user_id)
+            except Exception as exc:
+                log.warning("Could not DM update result to user %s: %s", user_id, exc)
+
+        # Clean up.
         pending_path.unlink(missing_ok=True)
         log_path.unlink(missing_ok=True)

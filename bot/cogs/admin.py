@@ -445,9 +445,13 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         log.info("Update requested by %s – shutting down with exit code %d.", interaction.user, EXIT_CODE_UPDATE)
 
         # Save context so the bot can report back after restart.
+        # The interaction token is valid for 15 min – the host wrapper
+        # and the bot use it to edit the original ephemeral response.
         pending = {
             "channel_id": interaction.channel_id,
             "user_id": interaction.user.id,
+            "application_id": interaction.application_id,
+            "interaction_token": interaction.token,
             "requested_at": datetime.now(timezone.utc).isoformat(),
         }
         pending_path = Path("data/pending_update.json")

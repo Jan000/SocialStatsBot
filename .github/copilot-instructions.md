@@ -11,7 +11,7 @@ Discord-Bot in Python, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follow
 - **aiosqlite** für async SQLite-Zugriff
 - **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket, Instagram/TikTok Web Scraping)
 - **tomllib** (stdlib) für die Konfigurationsdatei
-- **pytest** + **pytest-asyncio** für Unit-Tests (44 Tests)
+- **pytest** + **pytest-asyncio** für Unit-Tests (66 Tests)
 
 ## Projektstruktur
 
@@ -33,7 +33,8 @@ bot/
 │   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
 │   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
-│   └── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap)
+│   ├── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap)
+│   └── request.py         # User-Anfragen (Link/Unlink mit Admin-Approval-Buttons)
 └── services/
     ├── youtube.py          # YouTubeService – YouTube Data API v3 (rate-limited)
     ├── twitch.py           # TwitchService – Twitch Helix API + OAuth (rate-limited)
@@ -41,8 +42,9 @@ bot/
     ├── tiktok.py           # TikTokService – HTML Scraping (rate-limited, kein API-Key)
     └── eventsub.py         # TwitchEventSub – WebSocket-Client für Echtzeit-Events
 tests/
-├── test_database.py       # 27 Tests für Database-Layer
-└── test_roles.py          # 17 Tests für Role-Logic
+├── test_database.py       # 31 Tests für Database-Layer
+├── test_roles.py          # 17 Tests für Role-Logic
+└── test_cogs.py           # 18 Tests für Cog-Utilities
 data/
 └── bot.db                 # SQLite-Datenbank (auto-generiert)
 docs/
@@ -60,7 +62,7 @@ docs/
 ### Datenbank
 - Alles async über `aiosqlite`
 - Die `Database`-Klasse in `bot/database.py` kapselt alle Queries
-- Tabellen: `guild_settings`, `linked_accounts`, `sub_history`, `role_designs`, `scoreboard_messages`
+- Tabellen: `guild_settings`, `linked_accounts`, `sub_history`, `role_designs`, `scoreboard_messages`, `account_requests`
 - Neue Queries gehören als Methoden in die `Database`-Klasse
 - `guild_settings` wird per `get_guild_settings()` lazy angelegt (INSERT bei erstem Zugriff)
 - **Multi-Account**: UNIQUE auf `(guild_id, discord_user_id, platform, platform_id)` – ein User kann mehrere Accounts pro Plattform haben
@@ -80,10 +82,22 @@ docs/
 - **Keine `default_permissions`** – alle Commands sind standardmäßig sichtbar; Einschränkung über Discord-Integrationseinstellungen
 - Plattform-Auswahl über `@app_commands.choices(platform=PLATFORM_CHOICES)` mit `youtube`/`twitch`/`instagram`/`tiktok`
 - `PLATFORM_CHOICES` und andere shared constants sind in `bot/cogs/__init__.py` definiert
+- **Auto-Plattform-Erkennung**: `detect_platform_from_url()` in `bot/cogs/__init__.py` erkennt Plattform anhand der URL
+- `/admin link` und `/request link` haben `platform` als optionalen Parameter – wird bei URL-Eingabe automatisch erkannt
 - **Autocomplete** für Account-Namen (`account_name`) und Rollen-Design-IDs (`design_id`)
 - Autocomplete-Methode `_account_autocomplete` liest `interaction.namespace.user` + `interaction.namespace.platform`
 - Responses sind auf Deutsch
 - Ephemeral-Responses für Admin-Commands (`ephemeral=True`)
+
+### Anfragen-System (User Requests)
+- Normale User können über `/request link` und `/request unlink` Anfragen stellen
+- Anfragen werden im konfigurierten `request_channel_id` gepostet (Einstellung über `/settings request_channel`)
+- Jede Anfrage wird vor dem Posten validiert (API-Check + DB-Duplikatprüfung)
+- Embed mit Accept/Reject-Buttons (`RequestDecisionView`) – persistent, überlebt Bot-Neustarts
+- Bei Annahme: Bot führt Link/Unlink-Logik automatisch aus (Rollen, DB, etc.)
+- `account_requests`-Tabelle speichert alle Anfragen mit Status (pending/approved/rejected)
+- `custom_id` für Buttons: `request_accept`, `request_reject`
+- Request-ID wird im Embed-Footer gespeichert: `Anfrage #123`
 
 ### Rollen-System
 - Bot-verwaltete Rollen haben Prefixe: `[YouTube] `, `[Twitch] `, `[Instagram] `, `[TikTok] `
@@ -123,6 +137,7 @@ docs/
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
 - Setting-Prefixe: `yt_` (YouTube), `tw_` (Twitch), `ig_` (Instagram), `tt_` (TikTok)
 - Count-Channel-Keys: `{prefix}_count_channel_id`, `{prefix}_count_channel_pattern`
+- Globale Keys: `request_channel_id` (Anfragen-Kanal für User-Requests)
 
 ## Git-Workflow
 
@@ -165,6 +180,7 @@ await cleanup_unused_roles(guild, platform)
 | `sub_history` | Zeitgestempelte Abo-/Follower-Snapshots (dedupliziert) |
 | `role_designs` | Benutzerdefinierte Rollen pro Bereich/exakter Zahl |
 | `scoreboard_messages` | Persistente Scoreboard-Message-IDs |
+| `account_requests` | User-Anfragen für Link/Unlink (pending/approved/rejected) |
 
 ## Dokumentation
 

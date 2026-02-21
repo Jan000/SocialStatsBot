@@ -52,7 +52,22 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     yt_count_channel_pattern   TEXT    DEFAULT '📺 {count} YouTube Abos',
     tw_count_channel_pattern   TEXT    DEFAULT '🎮 {count} Twitch Follower',
     ig_count_channel_pattern   TEXT    DEFAULT '📷 {count} Instagram Follower',
-    tt_count_channel_pattern   TEXT    DEFAULT '🎵 {count} TikTok Follower'
+    tt_count_channel_pattern   TEXT    DEFAULT '🎵 {count} TikTok Follower',
+    request_channel_id         INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS account_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id        INTEGER NOT NULL,
+    discord_user_id INTEGER NOT NULL,
+    request_type    TEXT    NOT NULL,
+    platform        TEXT    NOT NULL,
+    platform_id     TEXT    NOT NULL DEFAULT '',
+    platform_name   TEXT    NOT NULL DEFAULT '',
+    follower_count  INTEGER DEFAULT 0,
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    message_id      INTEGER DEFAULT 0,
+    requested_at    REAL    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS linked_accounts (
@@ -199,6 +214,16 @@ class Database:
                     )
             await self.db.commit()
 
+            # Migration: add request_channel_id column to guild_settings
+            async with self.db.execute("PRAGMA table_info(guild_settings)") as cur:
+                gs_cols2 = {row[1] for row in await cur.fetchall()}
+            if "request_channel_id" not in gs_cols2:
+                log.info("Adding request_channel_id column to guild_settings...")
+                await self.db.execute(
+                    "ALTER TABLE guild_settings ADD COLUMN request_channel_id INTEGER DEFAULT 0"
+                )
+                await self.db.commit()
+
             # Migration: update default role patterns from old format
             await self.db.execute("""
                 UPDATE guild_settings
@@ -323,6 +348,7 @@ class Database:
             "tw_count_channel_pattern",
             "ig_count_channel_pattern",
             "tt_count_channel_pattern",
+            "request_channel_id",
         }
         if key not in allowed:
             raise ValueError(f"Unknown setting: {key}")
@@ -612,3 +638,61 @@ class Database:
             (guild_id, platform, channel_id, ids_str),
         )
         await self.db.commit()
+
+    # ── Account requests ─────────────────────────────────────────────
+
+    async def create_account_request(
+        self,
+        guild_id: int,
+        discord_user_id: int,
+        request_type: str,
+        platform: str,
+        platform_id: str,
+        platform_name: str,
+        follower_count: int = 0,
+    ) -> int:
+        """Create a new account request and return its row id."""
+        now = time.time()
+        async with self.db.execute(
+            """INSERT INTO account_requests
+               (guild_id, discord_user_id, request_type, platform,
+                platform_id, platform_name, follower_count, status, requested_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+            (guild_id, discord_user_id, request_type, platform,
+             platform_id, platform_name, follower_count, now),
+        ) as cur:
+            request_id = cur.lastrowid
+        await self.db.commit()
+        return request_id  # type: ignore[return-value]
+
+    async def get_account_request(self, request_id: int) -> dict | None:
+        """Return a single account request by its id."""
+        async with self.db.execute(
+            "SELECT * FROM account_requests WHERE id = ?", (request_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def update_request_status(
+        self, request_id: int, status: str, message_id: int = 0
+    ) -> None:
+        """Update the status (and optionally message_id) of a request."""
+        if message_id:
+            await self.db.execute(
+                "UPDATE account_requests SET status = ?, message_id = ? WHERE id = ?",
+                (status, message_id, request_id),
+            )
+        else:
+            await self.db.execute(
+                "UPDATE account_requests SET status = ? WHERE id = ?",
+                (status, request_id),
+            )
+        await self.db.commit()
+
+    async def get_pending_requests(self, guild_id: int) -> list[dict]:
+        """Return all pending requests for a guild."""
+        async with self.db.execute(
+            "SELECT * FROM account_requests WHERE guild_id = ? AND status = 'pending' ORDER BY requested_at",
+            (guild_id,),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]

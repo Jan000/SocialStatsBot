@@ -69,6 +69,7 @@ class SocialStatsBot(commands.Bot):
         await self.load_extension("bot.cogs.settings")
         await self.load_extension("bot.cogs.stats")
         await self.load_extension("bot.cogs.refresh")
+        await self.load_extension("bot.cogs.request")
 
         if self.dev_guild_id:
             guild = discord.Object(id=self.dev_guild_id)

@@ -18,6 +18,8 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 - **Docker-Support** – Deployment via `docker compose up`
 - **Historien-Tracking** – Alle Änderungen dedupliziert in SQLite gespeichert
 - **Flexible Eingabe** – YouTube-URLs, @Handles, Channel-IDs sowie Twitch-URLs, Login-Namen, Instagram-URLs/Usernames und TikTok-URLs/Usernames
+- **Auto-Plattform-Erkennung** – Bei URL-Eingabe wird die Plattform automatisch erkannt (kein manuelles Auswählen nötig)
+- **User-Anfragen-System** – Normale User können Link/Unlink-Anfragen stellen, Admins bestätigen per Button
 - **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert
 
 ## Setup
@@ -67,7 +69,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 
 | Command | Beschreibung |
 |---|---|
-| `/admin link <user> <platform> <channel_input>` | Account verknüpfen (YouTube/Twitch/Instagram/TikTok – URL, Handle, Login oder ID) |
+| `/admin link <user> <channel_input> [platform]` | Account verknüpfen (Plattform wird aus URL erkannt oder manuell gewählt) |
 | `/admin unlink <user> <platform> <account_name>` | Bestimmten Account entfernen (Autocomplete) |
 | `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen (paginiert) |
 | `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |
@@ -79,6 +81,14 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 |---|---|
 | `/stats growth <user> <platform> <account_name> [period]` | Wachstum eines Accounts über 7/30/90 Tage (Autocomplete) |
 | `/stats overview <platform> [period]` | Übersicht aller Accounts mit Wachstumsdaten |
+
+### Anfragen-Commands (`/request ...`)
+Für alle User zugänglich. Anfragen werden im konfigurierten Anfragen-Kanal gepostet, wo Admins per Button bestätigen/ablehnen können.
+
+| Command | Beschreibung |
+|---|---|
+| `/request link <channel_input> [platform]` | Anfrage zum Verknüpfen eines Accounts (Plattform wird aus URL erkannt) |
+| `/request unlink <platform> <account_name>` | Anfrage zum Entfernen eines Accounts (Autocomplete) |
 
 ### Einstellungen (`/settings ...`)
 | Command | Beschreibung |
@@ -94,6 +104,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 | `/settings remove_role_design <design_id>` | Design entfernen (Autocomplete) |
 | `/settings count_channel <platform> <channel>` | Count-Channel setzen (Voice-/Text-Channel, wird bei Refresh umbenannt) |
 | `/settings count_channel_pattern <platform> <pattern>` | Count-Channel-Pattern (`{count}` als Platzhalter) |
+| `/settings request_channel <channel>` | Anfragen-Kanal für User-Link/Unlink-Requests setzen |
 
 ## Rollen-System
 
@@ -120,13 +131,23 @@ Ein optionaler Voice- oder Text-Channel pro Plattform, dessen Name bei jedem Ref
 - Platzhalter: `{count}` – Gesamtzahl aller Accounts (mit Punkt-Tausendertrennung)
 - Konfigurierbar über `/settings count_channel` und `/settings count_channel_pattern`
 
+## Anfragen-System
+
+Normale User können über `/request link` und `/request unlink` Anfragen stellen. Der Bot:
+1. **Validiert** die Eingabe (prüft, ob Account auf der Plattform existiert)
+2. **Prüft Duplikate** (Link: nicht bereits verknüpft; Unlink: muss existieren)
+3. **Postet** die Anfrage als Embed mit ✅/❌-Buttons im konfigurierten Admin-Kanal
+4. Ein **Admin klickt** auf Annehmen oder Ablehnen – der Bot führt die Aktion automatisch aus
+
+Konfiguration: `/settings request_channel <channel>` setzt den Kanal für Anfragen.
+
 ## Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-44 Tests für Database-Layer und Role-Logic.
+66 Tests für Database-Layer, Role-Logic und Utility-Funktionen.
 
 ## Projektstruktur
 
@@ -150,7 +171,8 @@ pytest tests/ -v
 │   │   ├── admin.py         # Admin-Commands (Link/Unlink/Accounts/History)
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   ├── stats.py         # Statistik-Commands (Growth/Overview)
-│   │   └── refresh.py       # Background-Refresh-Loop + EventSub Bootstrap
+│   │   ├── refresh.py       # Background-Refresh-Loop + EventSub Bootstrap
+│   │   └── request.py       # User-Anfragen (Link/Unlink mit Admin-Approval)
 │   └── services/
 │       ├── youtube.py        # YouTube Data API v3 (rate-limited)
 │       ├── twitch.py         # Twitch Helix API + OAuth (rate-limited)
@@ -158,8 +180,9 @@ pytest tests/ -v
 │       ├── tiktok.py         # TikTok HTML Scraping (rate-limited)
 │       └── eventsub.py       # Twitch EventSub WebSocket-Client
 ├── tests/
-│   ├── test_database.py     # 27 Database-Tests
-│   └── test_roles.py        # 17 Role-Logic-Tests
+│   ├── test_database.py     # 31 Database-Tests
+│   ├── test_roles.py        # 17 Role-Logic-Tests
+│   └── test_cogs.py         # 18 Cog-Utility-Tests
 ├── data/                    # SQLite DB (auto-erstellt)
 └── docs/
     └── todos.md             # Aufgaben
@@ -175,7 +198,7 @@ Alle geplanten Features sind implementiert:
 - Statistik-Commands mit Wachstumsanalyse
 - Background-Refresh mit konfigurierbarem Intervall
 - Optionale Twitch EventSub WebSocket-Integration
-- 44 Unit-Tests (Database + Role-Logic)
+- 66 Unit-Tests (Database + Role-Logic + Utilities)
 - Docker-Support für einfaches Deployment
 
 ### Architektur-Entscheidungen

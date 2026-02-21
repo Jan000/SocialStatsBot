@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.bot import SocialStatsBot
-from bot.cogs import PLATFORM_CHOICES
+from bot.cogs import PLATFORM_CHOICES, PLATFORM_EMOJI
 from bot.roles import PLATFORM_SETTINGS_PREFIX
 from bot.database import ALL_PLATFORMS
 
@@ -63,22 +63,24 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         def ch(cid: int) -> str:
             return f"<#{cid}>" if cid else "Nicht gesetzt"
 
-        lines = [
-            "**⚙️ Aktuelle Einstellungen:**\n",
-            f"📺 **YouTube Scoreboard-Kanal:** {ch(s['yt_scoreboard_channel_id'])}",
-            f"📺 **YouTube Refresh-Intervall:** {s['yt_refresh_interval']}s",
-            f"📺 **YouTube Rollen-Pattern:** `{s['yt_default_role_pattern']}`",
-            f"📺 **YouTube Rollen-Farbe:** #{s['yt_default_role_color']:06X}",
-            f"📺 **YouTube Zähler-Kanal:** {ch(s.get('yt_count_channel_id', 0))}",
-            f"📺 **YouTube Zähler-Pattern:** `{s.get('yt_count_channel_pattern', '📺 {count} YouTube Abos')}`",
-            "",
-            f"🎮 **Twitch Scoreboard-Kanal:** {ch(s['tw_scoreboard_channel_id'])}",
-            f"🎮 **Twitch Refresh-Intervall:** {s['tw_refresh_interval']}s",
-            f"🎮 **Twitch Rollen-Pattern:** `{s['tw_default_role_pattern']}`",
-            f"🎮 **Twitch Rollen-Farbe:** #{s['tw_default_role_color']:06X}",
-            f"🎮 **Twitch Zähler-Kanal:** {ch(s.get('tw_count_channel_id', 0))}",
-            f"🎮 **Twitch Zähler-Pattern:** `{s.get('tw_count_channel_pattern', '🎮 {count} Twitch Follower')}`",
-        ]
+        lines = ["**⚙️ Aktuelle Einstellungen:**\n"]
+
+        # Platform-specific settings (data-driven loop)
+        for plat in ALL_PLATFORMS:
+            prefix = PLATFORM_SETTINGS_PREFIX[plat]
+            emoji = PLATFORM_EMOJI.get(plat, "")
+            name = plat.title()
+            lines.append(f"{emoji} **{name} Scoreboard-Kanal:** {ch(s[f'{prefix}_scoreboard_channel_id'])}")
+            lines.append(f"{emoji} **{name} Refresh-Intervall:** {s[f'{prefix}_refresh_interval']}s")
+            lines.append(f"{emoji} **{name} Rollen-Pattern:** `{s[f'{prefix}_default_role_pattern']}`")
+            lines.append(f"{emoji} **{name} Rollen-Farbe:** #{s[f'{prefix}_default_role_color']:06X}")
+            lines.append(f"{emoji} **{name} Zähler-Kanal:** {ch(s.get(f'{prefix}_count_channel_id', 0))}")
+            lines.append(f"{emoji} **{name} Zähler-Pattern:** `{s.get(f'{prefix}_count_channel_pattern', '')}`")
+            lines.append("")
+
+        # Global settings
+        lines.append(f"📋 **Anfragen-Kanal:** {ch(s.get('request_channel_id', 0))}")
+
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     # ── /settings scoreboard_channel ─────────────────────────────────
@@ -235,6 +237,28 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         await self.bot.db.update_guild_setting(interaction.guild_id, key, pattern)
         await interaction.response.send_message(
             f"✅ {platform.name} Zähler-Pattern auf `{pattern}` gesetzt.",
+            ephemeral=True,
+        )
+
+    # ── /settings request_channel ────────────────────────────────────
+
+    @app_commands.command(
+        name="request_channel",
+        description="Setzt den Kanal für Link/Unlink-Anfragen von Usern.",
+    )
+    @app_commands.describe(channel="Text-Kanal für Anfragen")
+    async def request_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        await self.bot.db.update_guild_setting(
+            interaction.guild_id, "request_channel_id", channel.id
+        )
+        await interaction.response.send_message(
+            f"✅ Anfragen-Kanal auf {channel.mention} gesetzt.\n"
+            "User können nun mit `/request link` und `/request unlink` "
+            "Anfragen stellen.",
             ephemeral=True,
         )
 

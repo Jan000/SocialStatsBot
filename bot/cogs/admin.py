@@ -18,7 +18,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.bot import EXIT_CODE_UPDATE, SocialStatsBot
-from bot.cogs import PLATFORM_CHOICES, PLATFORM_COUNT_LABEL, PLATFORM_COLOUR_INT, PLATFORM_EMOJI
+from bot.cogs import (
+    PLATFORM_CHOICES,
+    PLATFORM_COUNT_LABEL,
+    PLATFORM_COLOUR_INT,
+    PLATFORM_DISPLAY_NAME,
+    PLATFORM_EMOJI,
+    detect_platform_from_url,
+)
 from bot.roles import (
     compute_role_name_and_color,
     update_member_role,
@@ -71,48 +78,64 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     )
     @app_commands.describe(
         user="Discord-User",
-        platform="Plattform",
         channel_input="Kanal (URL, @Handle, Login-Name oder ID)",
+        platform="Plattform (optional bei URL-Eingabe)",
     )
     @app_commands.choices(platform=PLATFORM_CHOICES)
     async def link(
         self,
         interaction: discord.Interaction,
         user: discord.Member,
-        platform: app_commands.Choice[str],
         channel_input: str,
+        platform: app_commands.Choice[str] | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        info = await self._resolve_platform(platform.value, channel_input)
+        # Resolve platform – explicit choice or auto-detect from URL
+        if platform is not None:
+            plat_key = platform.value
+            plat_display = platform.name
+        else:
+            detected = detect_platform_from_url(channel_input)
+            if detected is None:
+                await interaction.followup.send(
+                    "❌ Plattform konnte nicht erkannt werden. "
+                    "Gib eine URL an oder wähle die Plattform manuell aus.",
+                    ephemeral=True,
+                )
+                return
+            plat_key = detected
+            plat_display = PLATFORM_DISPLAY_NAME[detected]
+
+        info = await self._resolve_platform(plat_key, channel_input)
         if info is None:
             await interaction.followup.send(
-                f"❌ Konnte den {platform.name}-Kanal nicht finden. Prüfe die Eingabe.",
+                f"❌ Konnte den {plat_display}-Kanal nicht finden. Prüfe die Eingabe.",
                 ephemeral=True,
             )
             return
         platform_id = info["id"]
         platform_name = info["display_name"]
         count = info.get("subscriber_count", info.get("follower_count", 0))
-        count_label = PLATFORM_COUNT_LABEL.get(platform.value, "Follower")
+        count_label = PLATFORM_COUNT_LABEL.get(plat_key, "Follower")
 
         await self.bot.db.link_account(
-            interaction.guild_id, user.id, platform.value, platform_id, platform_name
+            interaction.guild_id, user.id, plat_key, platform_id, platform_name
         )
         await self.bot.db.update_account_count(
-            interaction.guild_id, user.id, platform.value, platform_id, count
+            interaction.guild_id, user.id, plat_key, platform_id, count
         )
 
         settings = await self.bot.db.get_guild_settings(interaction.guild_id)
         role_name, role_color = await compute_role_name_and_color(
-            self.bot.db, interaction.guild_id, platform.value, count, settings, platform_name
+            self.bot.db, interaction.guild_id, plat_key, count, settings, platform_name
         )
         await update_member_role(
-            interaction.guild, user, platform.value, platform_name, role_name, role_color
+            interaction.guild, user, plat_key, platform_name, role_name, role_color
         )
 
         await interaction.followup.send(
-            f"✅ **{platform_name}** ({platform.name}) mit {user.mention} verknüpft.\n"
+            f"✅ **{platform_name}** ({plat_display}) mit {user.mention} verknüpft.\n"
             f"Aktuelle {count_label}: **{count:,}**".replace(",", "."),
             ephemeral=True,
         )

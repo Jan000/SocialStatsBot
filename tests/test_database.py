@@ -300,3 +300,61 @@ async def test_scoreboard_message_tiktok(db: Database):
     await db.set_scoreboard_message_ids(1, "tiktok", 999, [11111])
     ids = await db.get_scoreboard_message_ids(1, "tiktok")
     assert ids == [11111]
+
+
+# ── Account request tests ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_and_get_account_request(db: Database):
+    """create_account_request should return an id, get should retrieve it."""
+    rid = await db.create_account_request(
+        guild_id=1, discord_user_id=100, request_type="link",
+        platform="youtube", platform_id="UC123", platform_name="TestChannel",
+        follower_count=500,
+    )
+    assert rid is not None and rid > 0
+    req = await db.get_account_request(rid)
+    assert req is not None
+    assert req["guild_id"] == 1
+    assert req["discord_user_id"] == 100
+    assert req["request_type"] == "link"
+    assert req["platform"] == "youtube"
+    assert req["platform_id"] == "UC123"
+    assert req["platform_name"] == "TestChannel"
+    assert req["follower_count"] == 500
+    assert req["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_update_request_status(db: Database):
+    """update_request_status should change status and optionally message_id."""
+    rid = await db.create_account_request(
+        guild_id=1, discord_user_id=100, request_type="link",
+        platform="twitch", platform_id="tw123", platform_name="Test",
+    )
+    await db.update_request_status(rid, "approved", message_id=99999)
+    req = await db.get_account_request(rid)
+    assert req["status"] == "approved"
+    assert req["message_id"] == 99999
+
+
+@pytest.mark.asyncio
+async def test_get_pending_requests(db: Database):
+    """get_pending_requests should only return pending requests."""
+    r1 = await db.create_account_request(1, 100, "link", "youtube", "UC1", "Ch1")
+    r2 = await db.create_account_request(1, 200, "unlink", "twitch", "tw1", "Ch2")
+    await db.update_request_status(r1, "approved")
+    pending = await db.get_pending_requests(1)
+    assert len(pending) == 1
+    assert pending[0]["id"] == r2
+
+
+@pytest.mark.asyncio
+async def test_request_channel_id_setting(db: Database):
+    """request_channel_id should be a valid guild setting."""
+    settings = await db.get_guild_settings(1)
+    assert settings.get("request_channel_id") == 0
+    await db.update_guild_setting(1, "request_channel_id", 12345)
+    settings = await db.get_guild_settings(1)
+    assert settings["request_channel_id"] == 12345

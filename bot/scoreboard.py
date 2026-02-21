@@ -28,10 +28,10 @@ PLATFORM_LABELS = {
 }
 
 PLATFORM_THUMBNAIL = {
-    "youtube": "https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg",
-    "twitch": "https://assets.twitch.tv/assets/favicon-32-e29e246c157142c94346.png",
-    "instagram": "https://www.instagram.com/static/images/ico/favicon-192.png/68d99ba29cc8.png",
-    "tiktok": "https://sf-tb-sg.ibytedtos.com/obj/eden-sg/uhtyvueh7nulogpoguhm/tiktok-icon2.png",
+    "youtube": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/120px-YouTube_full-color_icon_%282017%29.svg.png",
+    "twitch": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Twitch_Glitch_Logo_Purple.svg/120px-Twitch_Glitch_Logo_Purple.svg.png",
+    "instagram": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/Instagram_icon.png/120px-Instagram_icon.png",
+    "tiktok": "https://upload.wikimedia.org/wikipedia/en/thumb/a/a9/TikTok_logo.svg/120px-TikTok_logo.svg.png",
 }
 
 PLATFORM_COLOUR = {

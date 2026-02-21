@@ -11,8 +11,8 @@
 # (scripts/discord_notify.py).  The full log is written to
 # data/update.log so the bot can show a final embed on restart.
 #
-# Usage:  ./update.sh          (runs in foreground)
-#         nohup ./update.sh &  (runs in background)
+# Usage:  bash update.sh          (runs in foreground)
+#         nohup bash update.sh &  (runs in background)
 # ──────────────────────────────────────────────────────────────
 
 cd "$(dirname "$0")"
@@ -22,17 +22,12 @@ LOG_FILE="data/update.log"
 
 # ── Helpers ──────────────────────────────────────────────────
 
-# Edit the original ephemeral interaction response in Discord.
-# Falls back silently if python3 is not available on the host.
-# Usage:  notify "status text"  [log_file]
 notify() {
     python3 scripts/discord_notify.py "$@" 2>/dev/null || true
 }
 
-# Run a command in the background, appending its output to LOG_FILE,
-# while updating the Discord message every 5 seconds with the latest
-# log tail.
-# Usage:  run_live "status label" command [args …]
+# Run a command, appending its output to LOG_FILE, while updating
+# the Discord message every 5 seconds with the latest log tail.
 run_live() {
     local label="$1"; shift
     "$@" >> "$LOG_FILE" 2>&1 &
@@ -50,10 +45,10 @@ run_live() {
 while true; do
     echo "▶ Starting bot …"
 
-    # Run in foreground; capture exit code (do NOT use set -e here,
-    # because a non-zero exit is expected on /admin update).
-    docker compose up --build --abort-on-container-exit --exit-code-from bot || true
-    EXIT_CODE=$(docker compose ps bot --format '{{.ExitCode}}' 2>/dev/null || echo "1")
+    # --exit-code-from bot makes docker compose exit with the
+    # container's exit code.  Capture it directly from $?.
+    docker compose up --build --abort-on-container-exit --exit-code-from bot
+    EXIT_CODE=$?
 
     echo "Container exited with code $EXIT_CODE."
 
@@ -63,7 +58,8 @@ while true; do
 
         # ── Step 1: git pull ─────────────────────────────────
         echo "── git pull ──────────────────────────" >> "$LOG_FILE"
-        if run_live $'🔄 \`git pull\` läuft …' git pull; then
+        notify "🔄 git pull läuft …"
+        if run_live "🔄 git pull läuft …" git pull; then
             echo "✅ git pull erfolgreich" >> "$LOG_FILE"
             GIT_OK=1
         else
@@ -76,9 +72,9 @@ while true; do
         # ── Step 2: docker compose build ─────────────────────
         echo "── docker compose build ──────────────" >> "$LOG_FILE"
         if [ "$GIT_OK" -eq 1 ]; then
-            BUILD_LABEL=$'✅ Git pull abgeschlossen.\n🔄 Docker build läuft …'
+            BUILD_LABEL="✅ Git pull abgeschlossen. 🔄 Docker build läuft …"
         else
-            BUILD_LABEL=$'⚠️ Git pull fehlgeschlagen.\n🔄 Docker build läuft …'
+            BUILD_LABEL="⚠️ Git pull fehlgeschlagen. 🔄 Docker build läuft …"
         fi
         if run_live "$BUILD_LABEL" docker compose build; then
             echo "✅ Build erfolgreich" >> "$LOG_FILE"
@@ -90,8 +86,7 @@ while true; do
 
         printf '=== Update abgeschlossen: %s ===\n' "$(date '+%d.%m.%Y %H:%M:%S')" >> "$LOG_FILE"
 
-        # Final status before restart.
-        notify $'✅ Build abgeschlossen.\n🔄 Bot startet neu …'
+        notify "✅ Build abgeschlossen. 🔄 Bot startet neu …"
 
         docker compose down
         # Loop continues → docker compose up --build at the top

@@ -3,6 +3,9 @@ Request cog – lets any user submit link/unlink requests for approval.
 
 Requests are validated (API check + DB duplicate check) and posted
 to a configurable admin channel with Accept / Reject buttons.
+
+Users can also submit link requests via a button on the scoreboard
+messages (opens a Modal dialog).
 """
 
 from __future__ import annotations
@@ -189,6 +192,150 @@ class RequestDecisionView(discord.ui.View):
             await interaction.message.edit(embed=new_embed, view=None)
 
         await interaction.followup.send(result_msg, ephemeral=True)
+
+
+# ── Scoreboard link-request button + modal ───────────────────────────
+
+
+class ScoreboardLinkModal(discord.ui.Modal):
+    """Modal dialog that lets a user submit a link request from the scoreboard."""
+
+    channel_input = discord.ui.TextInput(
+        label="Kanal (URL, @Handle oder Username)",
+        placeholder="https://www.youtube.com/@MeinKanal",
+        style=discord.TextStyle.short,
+        required=True,
+        max_length=200,
+    )
+
+    def __init__(self, platform: str) -> None:
+        self.platform = platform
+        plat_display = PLATFORM_DISPLAY_NAME.get(platform, platform)
+        super().__init__(title=f"{plat_display}-Account verknüpfen")
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        """Validate input, create DB request, post to admin channel."""
+        await interaction.response.defer(ephemeral=True)
+        bot: SocialStatsBot = interaction.client  # type: ignore[assignment]
+        guild = interaction.guild
+        if guild is None:
+            return
+
+        plat_key = self.platform
+        plat_display = PLATFORM_DISPLAY_NAME.get(plat_key, plat_key)
+        user_input = self.channel_input.value.strip()
+
+        # Check request channel is configured
+        settings = await bot.db.get_guild_settings(guild.id)
+        channel_id = settings.get("request_channel_id", 0)
+        if not channel_id:
+            await interaction.followup.send(
+                "❌ Es wurde noch kein Anfragen-Kanal konfiguriert. "
+                "Ein Admin muss `/settings request_channel` setzen.",
+                ephemeral=True,
+            )
+            return
+        request_channel = guild.get_channel(channel_id)
+        if request_channel is None or not isinstance(request_channel, discord.TextChannel):
+            await interaction.followup.send(
+                "❌ Der konfigurierte Anfragen-Kanal existiert nicht mehr.",
+                ephemeral=True,
+            )
+            return
+
+        # Resolve the platform account
+        try:
+            info = await resolve_platform(bot, plat_key, user_input)
+        except PlatformRateLimitError:
+            await interaction.followup.send(
+                f"⏳ {plat_display} ist vorübergehend nicht erreichbar (Rate-Limit). "
+                "Bitte versuche es später erneut.",
+                ephemeral=True,
+            )
+            return
+        if info is None:
+            await interaction.followup.send(
+                f"❌ Konnte den {plat_display}-Kanal nicht finden. Prüfe die Eingabe.",
+                ephemeral=True,
+            )
+            return
+
+        platform_id = info["id"]
+        platform_name = info["display_name"]
+        count = info.get("subscriber_count", info.get("follower_count", 0))
+
+        # Check duplicate
+        existing = await bot.db.find_linked_account_by_name(
+            guild.id, interaction.user.id, plat_key, platform_name,
+        )
+        if existing is not None:
+            await interaction.followup.send(
+                f"❌ **{platform_name}** ({plat_display}) ist bereits mit dir verknüpft.",
+                ephemeral=True,
+            )
+            return
+
+        # Create DB request
+        request_id = await bot.db.create_account_request(
+            guild_id=guild.id,
+            discord_user_id=interaction.user.id,
+            request_type="link",
+            platform=plat_key,
+            platform_id=platform_id,
+            platform_name=platform_name,
+            follower_count=count,
+        )
+
+        # Build embed for admin channel
+        emoji = PLATFORM_EMOJI.get(plat_key, "")
+        count_label = PLATFORM_COUNT_LABEL.get(plat_key, "Follower")
+        embed = discord.Embed(
+            title=f"{emoji} Link-Anfrage",
+            description=f"{interaction.user.mention} möchte einen {plat_display}-Account verknüpfen.",
+            color=PLATFORM_COLOUR_INT.get(plat_key, 0x5865F2),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="Plattform", value=plat_display, inline=True)
+        embed.add_field(name="Account", value=platform_name, inline=True)
+        embed.add_field(name=count_label, value=f"{count:,}".replace(",", "."), inline=True)
+        embed.add_field(name="Status", value="⏳ Ausstehend", inline=False)
+        embed.set_footer(text=f"Anfrage #{request_id}")
+
+        msg = await request_channel.send(embed=embed, view=RequestDecisionView())
+        await bot.db.update_request_status(request_id, "pending", message_id=msg.id)
+
+        await interaction.followup.send(
+            f"✅ Deine Anfrage für **{platform_name}** ({plat_display}) wurde eingereicht. "
+            "Ein Admin wird sie prüfen.",
+            ephemeral=True,
+        )
+
+
+def _scoreboard_button_custom_id(platform: str) -> str:
+    """Return the stable custom_id for a scoreboard link button."""
+    return f"scoreboard_link_{platform}"
+
+
+class ScoreboardRequestView(discord.ui.View):
+    """Persistent view attached to scoreboard messages with a link-request button."""
+
+    def __init__(self, platform: str) -> None:
+        super().__init__(timeout=None)
+        self.platform = platform
+        emoji = PLATFORM_EMOJI.get(platform, "🔗")
+        plat_display = PLATFORM_DISPLAY_NAME.get(platform, platform)
+        btn = discord.ui.Button(
+            label=f"{plat_display}-Account verknüpfen",
+            style=discord.ButtonStyle.primary,
+            custom_id=_scoreboard_button_custom_id(platform),
+            emoji=emoji,
+        )
+        btn.callback = self._on_click
+        self.add_item(btn)
+
+    async def _on_click(self, interaction: discord.Interaction) -> None:
+        """Open the link-request modal."""
+        await interaction.response.send_modal(ScoreboardLinkModal(self.platform))
 
 
 # ── Request command group ────────────────────────────────────────────
@@ -444,6 +591,8 @@ class RequestCog(commands.GroupCog, group_name="request"):
 
 
 async def setup(bot: SocialStatsBot) -> None:
-    # Register the persistent view so buttons work after restart
+    # Register persistent views so buttons work after restart
     bot.add_view(RequestDecisionView())
+    for platform in ("youtube", "twitch", "instagram", "tiktok"):
+        bot.add_view(ScoreboardRequestView(platform))
     await bot.add_cog(RequestCog(bot))

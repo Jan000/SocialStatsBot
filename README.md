@@ -7,7 +7,7 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 - **4-Plattform-Support** – YouTube, Twitch, Instagram & TikTok
 - **Account-Verknüpfung** – Multi-Account-Support (mehrere Accounts pro User & Plattform)
 - **Automatische Rollen** – Jeder Account bekommt eine eigene Rolle (z.B. `[YouTube] MeinKanal - 1.234 Abos`)
-- **Scoreboards** – Leaderboards in konfigurierbaren Channels, auto-aktualisiert (alle Accounts, auto-split bei langen Listen)
+- **Scoreboards** – Leaderboards in konfigurierbaren Channels, auto-aktualisiert (alle Accounts, auto-split bei langen Listen, Link-Request-Button)
 - **Count-Channel** – Ein Channel pro Plattform, dessen Name bei jedem Refresh auf die aktuelle Gesamtzahl aktualisiert wird (z.B. `📺 1.234 YouTube Abos`)
 - **Statistik-Commands** – Wachstumsanalyse über 7/30/90 Tage
 - **Benutzerdefinierte Rollen-Designs** – Eigene Rollen-Muster je Abo-Bereich oder exakter Zahl
@@ -19,7 +19,7 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 - **Historien-Tracking** – Alle Änderungen dedupliziert in SQLite gespeichert
 - **Flexible Eingabe** – YouTube-URLs, @Handles, Channel-IDs sowie Twitch-URLs, Login-Namen, Instagram-URLs/Usernames und TikTok-URLs/Usernames
 - **Auto-Plattform-Erkennung** – Bei URL-Eingabe wird die Plattform automatisch erkannt (kein manuelles Auswählen nötig)
-- **User-Anfragen-System** – Normale User können Link/Unlink-Anfragen stellen, Admins bestätigen per Button
+- **User-Anfragen-System** – Normale User können Link/Unlink-Anfragen stellen, Admins bestätigen per Button. Link-Anfragen auch direkt über den Scoreboard-Button möglich.
 - **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert
 
 ## Setup
@@ -133,7 +133,7 @@ Ein optionaler Voice- oder Text-Channel pro Plattform, dessen Name bei jedem Ref
 
 ## Anfragen-System
 
-Normale User können über `/request link` und `/request unlink` Anfragen stellen. Der Bot:
+Normale User können über `/request link` und `/request unlink` Anfragen stellen. Zusätzlich zeigt jedes Scoreboard einen **Button** an, über den User direkt eine Link-Anfrage für die jeweilige Plattform stellen können (öffnet einen Dialog zur Eingabe von URL/Username). Der Bot:
 1. **Validiert** die Eingabe (prüft, ob Account auf der Plattform existiert)
 2. **Prüft Duplikate** (Link: nicht bereits verknüpft; Unlink: muss existieren)
 3. **Postet** die Anfrage als Embed mit ✅/❌-Buttons im konfigurierten Admin-Kanal
@@ -172,7 +172,7 @@ pytest tests/ -v
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   ├── stats.py         # Statistik-Commands (Growth/Overview)
 │   │   ├── refresh.py       # Background-Refresh-Loop + EventSub Bootstrap
-│   │   └── request.py       # User-Anfragen (Link/Unlink mit Admin-Approval)
+│   │   └── request.py       # User-Anfragen (Link/Unlink mit Admin-Approval + Scoreboard-Button)
 │   └── services/
 │       ├── youtube.py        # YouTube Data API v3 (rate-limited)
 │       ├── twitch.py         # Twitch Helix API + OAuth (rate-limited)

@@ -183,8 +183,11 @@ async def update_scoreboard(
     """Update or send the scoreboard message(s) for a guild+platform.
 
     Handles 1-2 messages and cleans up surplus old messages when the
-    scoreboard shrinks back to a single message.
+    scoreboard shrinks back to a single message.  The last message
+    carries a "Link-Request" button so users can submit requests.
     """
+    from bot.cogs.request import ScoreboardRequestView
+
     prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
     channel_id = settings.get(f"{prefix}_scoreboard_channel_id", 0)
     if not channel_id:
@@ -196,23 +199,32 @@ async def update_scoreboard(
 
     embeds = await build_scoreboard_embeds(bot.db, guild, platform, settings)
 
+    # The link-request button is attached to the LAST scoreboard message.
+    link_view = ScoreboardRequestView(platform)
+
     # Retrieve previously stored message IDs (may be 0, 1 or 2)
     old_ids = await bot.db.get_scoreboard_message_ids(guild.id, platform)
     new_ids: list[int] = []
 
+    last_idx = len(embeds) - 1
+    # Empty view removes components; None would leave them unchanged on edit.
+    empty_view = discord.ui.View()
     for i, embed in enumerate(embeds):
+        is_last = i == last_idx
+        view = link_view if is_last else empty_view
         sent = False
+
         if i < len(old_ids):
             try:
                 msg = await channel.fetch_message(old_ids[i])
-                await msg.edit(embed=embed)
+                await msg.edit(embed=embed, view=view)
                 new_ids.append(msg.id)
                 sent = True
             except (discord.NotFound, discord.HTTPException):
                 pass
         if not sent:
             try:
-                msg = await channel.send(embed=embed)
+                msg = await channel.send(embed=embed, view=view)
                 new_ids.append(msg.id)
             except discord.Forbidden:
                 log.error(

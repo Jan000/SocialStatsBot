@@ -34,7 +34,7 @@ bot/
 │   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
 │   ├── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap)
-│   └── request.py         # User-Anfragen (Link/Unlink mit Admin-Approval-Buttons)
+│   ├── request.py         # User-Anfragen (Link/Unlink mit Admin-Approval-Buttons + Scoreboard-Button)
 └── services/
     ├── youtube.py          # YouTubeService – YouTube Data API v3 (rate-limited)
     ├── twitch.py           # TwitchService – Twitch Helix API + OAuth (rate-limited)
@@ -92,13 +92,18 @@ docs/
 
 ### Anfragen-System (User Requests)
 - Normale User können über `/request link` und `/request unlink` Anfragen stellen
+- **Scoreboard-Button**: Jedes Scoreboard hat unten einen persistenten Button, über den User eine Link-Anfrage für die jeweilige Plattform stellen können
+- Button öffnet `ScoreboardLinkModal` (Discord Modal mit Textfeld für URL/Username)
+- `ScoreboardRequestView` ist eine persistente View mit einem Button pro Plattform (`custom_id`: `scoreboard_link_{platform}`)
+- Modal-Submit-Handler validiert und erstellt die Anfrage wie `/request link`
 - Anfragen werden im konfigurierten `request_channel_id` gepostet (Einstellung über `/settings request_channel`)
 - Jede Anfrage wird vor dem Posten validiert (API-Check + DB-Duplikatprüfung)
 - Embed mit Accept/Reject-Buttons (`RequestDecisionView`) – persistent, überlebt Bot-Neustarts
-- Bei Annahme: Bot führt Link/Unlink-Logik automatisch aus (Rollen, DB, etc.)
+- Bei Annahme: Bot führt Link/Unlink-Logik automatisch aus (Rollen, DB, Scoreboard, Count-Channel)
 - `account_requests`-Tabelle speichert alle Anfragen mit Status (pending/approved/rejected)
-- `custom_id` für Buttons: `request_accept`, `request_reject`
+- `custom_id` für Buttons: `request_accept`, `request_reject`, `scoreboard_link_{platform}`
 - Request-ID wird im Embed-Footer gespeichert: `Anfrage #123`
+- Alle persistenten Views werden in `setup()` registriert: `RequestDecisionView` + `ScoreboardRequestView` (4×, je Plattform)
 
 ### Rollen-System
 - Bot-verwaltete Rollen haben Prefixe: `[YouTube] `, `[Twitch] `, `[Instagram] `, `[TikTok] `

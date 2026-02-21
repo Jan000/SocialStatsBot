@@ -22,6 +22,7 @@ from bot.cogs import (
     PLATFORM_DISPLAY_NAME,
     PLATFORM_EMOJI,
     detect_platform_from_url,
+    resolve_platform,
 )
 from bot.roles import (
     compute_role_name_and_color,
@@ -190,37 +191,6 @@ class RequestCog(commands.GroupCog, group_name="request"):
 
     # ── Helpers ──────────────────────────────────────────────────────
 
-    async def _resolve_platform(self, platform: str, user_input: str) -> dict | None:
-        """Resolve user input into a normalised info dict for the given platform.
-
-        Returns dict with id, display_name, follower_count (or subscriber_count
-        for YouTube), or None on error.
-        """
-        if platform == "youtube":
-            info = await self.bot.youtube.resolve_channel(user_input)
-            if info is None:
-                return None
-            return {
-                "id": info["id"],
-                "display_name": info["title"],
-                "subscriber_count": info["subscriber_count"],
-                "follower_count": info["subscriber_count"],
-            }
-        elif platform == "twitch":
-            info = await self.bot.twitch.get_channel_info(user_input)
-            if info is None:
-                return None
-            return {
-                "id": info["id"],
-                "display_name": info["display_name"],
-                "follower_count": info["follower_count"],
-            }
-        elif platform == "instagram":
-            return await self.bot.instagram.get_channel_info(user_input)
-        elif platform == "tiktok":
-            return await self.bot.tiktok.get_channel_info(user_input)
-        return None
-
     async def _get_request_channel(
         self, interaction: discord.Interaction,
     ) -> discord.TextChannel | None:
@@ -284,7 +254,7 @@ class RequestCog(commands.GroupCog, group_name="request"):
             return
 
         # Validate: does the channel actually exist on the platform?
-        info = await self._resolve_platform(plat_key, channel_input)
+        info = await resolve_platform(self.bot, plat_key, channel_input)
         if info is None:
             await interaction.followup.send(
                 f"❌ Konnte den {plat_display}-Kanal nicht finden. Prüfe die Eingabe.",

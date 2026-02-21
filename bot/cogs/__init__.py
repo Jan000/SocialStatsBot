@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from discord import app_commands
+
+if TYPE_CHECKING:
+    from bot.bot import SocialStatsBot
 
 # ── Platform choices (reused across all cogs) ────────────────────────
 PLATFORM_CHOICES = [
@@ -59,4 +63,52 @@ def detect_platform_from_url(url: str) -> str | None:
     for pattern, platform in _URL_PLATFORM_PATTERNS:
         if pattern.match(url):
             return platform
+    return None
+
+
+# ── Shared API helpers (used by admin, request, refresh cogs) ────────
+
+
+async def resolve_platform(bot: SocialStatsBot, platform: str, user_input: str) -> dict | None:
+    """Resolve user input into a normalised info dict for the given platform.
+
+    Returns dict with keys ``id``, ``display_name``, ``follower_count``
+    (and additionally ``subscriber_count`` for YouTube), or *None* on error.
+    """
+    if platform == "youtube":
+        info = await bot.youtube.resolve_channel(user_input)
+        if info is None:
+            return None
+        return {
+            "id": info["id"],
+            "display_name": info["title"],
+            "subscriber_count": info["subscriber_count"],
+            "follower_count": info["subscriber_count"],
+        }
+    elif platform == "twitch":
+        info = await bot.twitch.get_channel_info(user_input)
+        if info is None:
+            return None
+        return {
+            "id": info["id"],
+            "display_name": info["display_name"],
+            "follower_count": info["follower_count"],
+        }
+    elif platform == "instagram":
+        return await bot.instagram.get_channel_info(user_input)
+    elif platform == "tiktok":
+        return await bot.tiktok.get_channel_info(user_input)
+    return None
+
+
+async def fetch_count(bot: SocialStatsBot, platform: str, account: dict) -> int | None:
+    """Fetch the current subscriber/follower count for an account."""
+    if platform == "youtube":
+        return await bot.youtube.get_subscriber_count(account["platform_id"])
+    elif platform == "twitch":
+        return await bot.twitch.get_follower_count(account["platform_id"])
+    elif platform == "instagram":
+        return await bot.instagram.get_follower_count(account["platform_id"])
+    elif platform == "tiktok":
+        return await bot.tiktok.get_follower_count(account["platform_id"])
     return None

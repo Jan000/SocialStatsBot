@@ -167,7 +167,7 @@ pytest tests/ -v
 │   ├── pagination.py        # PaginationView (Discord-Buttons)
 │   ├── ratelimit.py         # Token-Bucket Rate-Limiter
 │   ├── cogs/
-│   │   ├── __init__.py       # Shared platform constants
+│   │   ├── __init__.py       # Shared platform constants & helpers
 │   │   ├── admin.py         # Admin-Commands (Link/Unlink/Accounts/History)
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   ├── stats.py         # Statistik-Commands (Growth/Overview)

@@ -25,6 +25,8 @@ from bot.cogs import (
     PLATFORM_DISPLAY_NAME,
     PLATFORM_EMOJI,
     detect_platform_from_url,
+    fetch_count,
+    resolve_platform,
 )
 from bot.roles import (
     compute_role_name_and_color,
@@ -107,7 +109,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             plat_key = detected
             plat_display = PLATFORM_DISPLAY_NAME[detected]
 
-        info = await self._resolve_platform(plat_key, channel_input)
+        info = await resolve_platform(self.bot, plat_key, channel_input)
         if info is None:
             await interaction.followup.send(
                 f"❌ Konnte den {plat_display}-Kanal nicht finden. Prüfe die Eingabe.",
@@ -223,17 +225,14 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             return
 
         lines: list[str] = []
-        platform_meta = [
-            ("youtube", "YouTube", "📺", "Abos"),
-            ("twitch", "Twitch", "🎮", "Follower"),
-            ("instagram", "Instagram", "📷", "Follower"),
-            ("tiktok", "TikTok", "🎵", "Follower"),
-        ]
-        for plat, label, emoji, count_label in platform_meta:
+        for plat in ALL_PLATFORMS:
             accs = all_accounts.get(plat)
             if accs:
                 if lines:
                     lines.append("")
+                emoji = PLATFORM_EMOJI.get(plat, "")
+                label = PLATFORM_DISPLAY_NAME.get(plat, plat.title())
+                count_label = PLATFORM_COUNT_LABEL.get(plat, "Follower")
                 lines.append(f"{emoji} **{label}:**")
                 for acc in accs:
                     count = f"{acc['current_count']:,}".replace(",", ".")
@@ -281,7 +280,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             settings = await self.bot.db.get_guild_settings(interaction.guild_id)
 
             for acc in accounts:
-                count = await self._fetch_count(plat, acc)
+                count = await fetch_count(self.bot, plat, acc)
                 if count is None:
                     await self.bot.db.set_account_status(
                         interaction.guild_id, acc["discord_user_id"], plat,
@@ -383,51 +382,6 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         return await self._account_autocomplete(interaction, current)
-
-    # ── Helpers ──────────────────────────────────────────────────────
-
-    async def _fetch_count(self, platform: str, account: dict) -> int | None:
-        """Fetch the current count for an account."""
-        if platform == "youtube":
-            return await self.bot.youtube.get_subscriber_count(account["platform_id"])
-        elif platform == "twitch":
-            return await self.bot.twitch.get_follower_count(account["platform_id"])
-        elif platform == "instagram":
-            return await self.bot.instagram.get_follower_count(account["platform_id"])
-        elif platform == "tiktok":
-            return await self.bot.tiktok.get_follower_count(account["platform_id"])
-        return None
-
-    async def _resolve_platform(self, platform: str, user_input: str) -> dict | None:
-        """Resolve user input into a normalised info dict for the given platform.
-
-        Returns dict with id, display_name, follower_count (or subscriber_count
-        for YouTube), or None on error.
-        """
-        if platform == "youtube":
-            info = await self.bot.youtube.resolve_channel(user_input)
-            if info is None:
-                return None
-            return {
-                "id": info["id"],
-                "display_name": info["title"],
-                "subscriber_count": info["subscriber_count"],
-                "follower_count": info["subscriber_count"],
-            }
-        elif platform == "twitch":
-            info = await self.bot.twitch.get_channel_info(user_input)
-            if info is None:
-                return None
-            return {
-                "id": info["id"],
-                "display_name": info["display_name"],
-                "follower_count": info["follower_count"],
-            }
-        elif platform == "instagram":
-            return await self.bot.instagram.get_channel_info(user_input)
-        elif platform == "tiktok":
-            return await self.bot.tiktok.get_channel_info(user_input)
-        return None
 
     # ── Error handler ────────────────────────────────────────────────
 

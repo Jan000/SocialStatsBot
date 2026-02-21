@@ -14,6 +14,7 @@ import logging
 
 import discord
 
+from bot.cogs import PLATFORM_COUNT_LABEL
 from bot.database import Database
 from bot.roles import format_count
 
@@ -24,13 +25,6 @@ PLATFORM_LABELS = {
     "twitch": ("Twitch Follower", "🎮"),
     "instagram": ("Instagram Follower", "📷"),
     "tiktok": ("TikTok Follower", "🎵"),
-}
-
-COUNT_LABEL = {
-    "youtube": "Abos",
-    "twitch": "Follower",
-    "instagram": "Follower",
-    "tiktok": "Follower",
 }
 
 PLATFORM_THUMBNAIL = {
@@ -49,13 +43,6 @@ PLATFORM_COLOUR = {
 
 # Import the settings-prefix mapping from roles.
 from bot.roles import PLATFORM_SETTINGS_PREFIX
-
-PLATFORM_COLOUR = {
-    "youtube": discord.Colour(0xFF0000),
-    "twitch": discord.Colour(0x6441A4),
-    "instagram": discord.Colour(0xDB4A76),
-    "tiktok": discord.Colour(0x000000),
-}
 
 # Discord hard-limit for a single embed description.
 _MAX_DESCRIPTION = 4096
@@ -129,7 +116,7 @@ async def build_scoreboard_embeds(
         return [embed]
 
     # ── Summary line ─────────────────────────────────────────────
-    c_label = COUNT_LABEL.get(platform, "")
+    c_label = PLATFORM_COUNT_LABEL.get(platform, "")
     total = sum(a["current_count"] for a in accounts)
     summary = f"**{len(accounts)}** Accounts • Gesamt: **{format_count(total)}** {c_label}\n"
 

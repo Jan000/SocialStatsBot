@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands, tasks
 
 from bot.bot import SocialStatsBot
+from bot.cogs import fetch_count
 from bot.database import ALL_PLATFORMS
 from bot.roles import (
     compute_role_name_and_color,
@@ -68,7 +69,7 @@ class RefreshCog(commands.Cog):
 
             any_updated = False
             for acc in accounts:
-                count = await self._fetch_count(platform, acc)
+                count = await fetch_count(self.bot, platform, acc)
                 if count is None:
                     log.warning(
                         "API error for %s account %s (%s) in guild %s",
@@ -101,17 +102,6 @@ class RefreshCog(commands.Cog):
                 await cleanup_unused_roles(guild, platform)
                 await update_scoreboard(self.bot, guild, platform, settings)
                 await update_count_channel(self.bot, guild, platform, settings)
-
-    async def _fetch_count(self, platform: str, account: dict) -> int | None:
-        if platform == "youtube":
-            return await self.bot.youtube.get_subscriber_count(account["platform_id"])
-        elif platform == "twitch":
-            return await self.bot.twitch.get_follower_count(account["platform_id"])
-        elif platform == "instagram":
-            return await self.bot.instagram.get_follower_count(account["platform_id"])
-        elif platform == "tiktok":
-            return await self.bot.tiktok.get_follower_count(account["platform_id"])
-        return None
 
     async def _bootstrap_eventsub(self) -> None:
         """Subscribe all existing Twitch accounts to EventSub on startup."""

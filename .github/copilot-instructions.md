@@ -29,7 +29,7 @@ bot/
 ├── pagination.py          # PaginationView – Discord-Buttons für Seiten-Navigation
 ├── ratelimit.py           # Token-Bucket Rate-Limiter für API-Requests
 ├── cogs/
-│   ├── __init__.py        # Shared platform constants (PLATFORM_CHOICES etc.)
+│   ├── __init__.py        # Shared platform constants & helpers (PLATFORM_CHOICES, resolve_platform, fetch_count etc.)
 │   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
 │   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
@@ -82,6 +82,7 @@ docs/
 - **Keine `default_permissions`** – alle Commands sind standardmäßig sichtbar; Einschränkung über Discord-Integrationseinstellungen
 - Plattform-Auswahl über `@app_commands.choices(platform=PLATFORM_CHOICES)` mit `youtube`/`twitch`/`instagram`/`tiktok`
 - `PLATFORM_CHOICES` und andere shared constants sind in `bot/cogs/__init__.py` definiert
+- **Shared Helpers**: `resolve_platform(bot, platform, user_input)` und `fetch_count(bot, platform, account)` in `bot/cogs/__init__.py` – zentral für alle Cogs, keine Duplikate in einzelnen Cogs
 - **Auto-Plattform-Erkennung**: `detect_platform_from_url()` in `bot/cogs/__init__.py` erkennt Plattform anhand der URL
 - `/admin link` und `/request link` haben `platform` als optionalen Parameter – wird bei URL-Eingabe automatisch erkannt
 - **Autocomplete** für Account-Namen (`account_name`) und Rollen-Design-IDs (`design_id`)
@@ -164,6 +165,16 @@ class AdminCog(commands.GroupCog, group_name="admin"):
 # Plattform-Auswahl (shared constant in bot/cogs/__init__.py)
 from bot.cogs import PLATFORM_CHOICES
 @app_commands.choices(platform=PLATFORM_CHOICES)
+
+# Zentrale Plattform-Helpers (statt Duplikate in Cogs)
+from bot.cogs import resolve_platform, fetch_count
+info = await resolve_platform(self.bot, platform, channel_input)
+count = await fetch_count(self.bot, platform, account)
+
+# Datengetriebene Plattform-Iterationen (statt hardcoded Listen)
+from bot.cogs import PLATFORM_DISPLAY_NAME, PLATFORM_EMOJI, PLATFORM_COUNT_LABEL
+for plat in ("youtube", "twitch", "instagram", "tiktok"):
+    label = f"{PLATFORM_EMOJI[plat]} {PLATFORM_DISPLAY_NAME[plat]}"
 
 # Rollen-Name bauen
 role_name, role_color = await compute_role_name_and_color(db, guild_id, platform, count, settings, platform_name)

@@ -2,16 +2,16 @@
 
 ## Projektübersicht
 
-Discord-Bot in Python, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als Discord-Rollen anzeigt und Scoreboards pflegt. Ein Discord-User kann mehrere YouTube- und Twitch-Accounts verknüpft haben. Alle Daten werden in einer SQLite-Datenbank gespeichert. **Phase: Feature-Complete.**
+Discord-Bot in Python, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und TikTok-Follower trackt, als Discord-Rollen anzeigt und Scoreboards pflegt. Ein Discord-User kann mehrere Accounts pro Plattform verknüpft haben. Alle Daten werden in einer SQLite-Datenbank gespeichert. **Phase: Feature-Complete.**
 
 ## Technologie-Stack
 
 - **Python 3.11+**
 - **discord.py 2.x** mit Slash-Commands (`app_commands`)
 - **aiosqlite** für async SQLite-Zugriff
-- **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket)
+- **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket, Instagram/TikTok Web Scraping)
 - **tomllib** (stdlib) für die Konfigurationsdatei
-- **pytest** + **pytest-asyncio** für Unit-Tests (31 Tests)
+- **pytest** + **pytest-asyncio** für Unit-Tests (44 Tests)
 
 ## Projektstruktur
 
@@ -29,6 +29,7 @@ bot/
 ├── pagination.py          # PaginationView – Discord-Buttons für Seiten-Navigation
 ├── ratelimit.py           # Token-Bucket Rate-Limiter für API-Requests
 ├── cogs/
+│   ├── __init__.py        # Shared platform constants (PLATFORM_CHOICES etc.)
 │   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
 │   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
@@ -36,10 +37,12 @@ bot/
 └── services/
     ├── youtube.py          # YouTubeService – YouTube Data API v3 (rate-limited)
     ├── twitch.py           # TwitchService – Twitch Helix API + OAuth (rate-limited)
+    ├── instagram.py        # InstagramService – Public Web API (rate-limited, kein API-Key)
+    ├── tiktok.py           # TikTokService – HTML Scraping (rate-limited, kein API-Key)
     └── eventsub.py         # TwitchEventSub – WebSocket-Client für Echtzeit-Events
 tests/
-├── test_database.py       # 20 Tests für Database-Layer
-└── test_roles.py          # 11 Tests für Role-Logic
+├── test_database.py       # 27 Tests für Database-Layer
+└── test_roles.py          # 17 Tests für Role-Logic
 data/
 └── bot.db                 # SQLite-Datenbank (auto-generiert)
 docs/
@@ -49,7 +52,7 @@ docs/
 ## Architektur & Konventionen
 
 ### Bot-Klasse
-- `SocialStatsBot` erbt von `commands.Bot` und trägt alle shared resources: `db`, `youtube`, `twitch`
+- `SocialStatsBot` erbt von `commands.Bot` und trägt alle shared resources: `db`, `youtube`, `twitch`, `instagram`, `tiktok`
 - **Kein eigenes Permission-System** – keine `default_permissions`-Einschränkung auf den Commands
 - Server-Admins konfigurieren Command-Zugriffe ausschließlich über Server-Einstellungen > Integrationen
 - Cogs werden in `setup_hook()` geladen
@@ -75,14 +78,16 @@ docs/
 ### Slash-Commands
 - Alle Commands nutzen `@app_commands.command()` (discord.py 2.x Slash-Commands)
 - **Keine `default_permissions`** – alle Commands sind standardmäßig sichtbar; Einschränkung über Discord-Integrationseinstellungen
-- Plattform-Auswahl über `@app_commands.choices(platform=[...])` mit `youtube`/`twitch`
+- Plattform-Auswahl über `@app_commands.choices(platform=PLATFORM_CHOICES)` mit `youtube`/`twitch`/`instagram`/`tiktok`
+- `PLATFORM_CHOICES` und andere shared constants sind in `bot/cogs/__init__.py` definiert
 - **Autocomplete** für Account-Namen (`account_name`) und Rollen-Design-IDs (`design_id`)
 - Autocomplete-Methode `_account_autocomplete` liest `interaction.namespace.user` + `interaction.namespace.platform`
 - Responses sind auf Deutsch
 - Ephemeral-Responses für Admin-Commands (`ephemeral=True`)
 
 ### Rollen-System
-- Bot-verwaltete Rollen haben Prefixe: `[YouTube] ` für YouTube, `[Twitch] ` für Twitch
+- Bot-verwaltete Rollen haben Prefixe: `[YouTube] `, `[Twitch] `, `[Instagram] `, `[TikTok] `
+- `PLATFORM_PREFIX` und `PLATFORM_SETTINGS_PREFIX` Dicts in `bot/roles.py` mappen Plattform → Prefix
 - `{count}` und `{name}` sind Platzhalter in Rollen-Patterns
 - Beispiel: `[YouTube] MeinKanal - 1.234 Abos`
 - Jeder Account bekommt seine eigene Rolle
@@ -92,26 +97,32 @@ docs/
 ### Count-Channel
 - Optionaler Voice-/Text-Channel pro Plattform, der bei jedem Refresh umbenannt wird
 - Zeigt die Gesamtzahl aller verknüpften Accounts der Plattform an
-- Settings: `yt_count_channel_id`, `tw_count_channel_id`, `yt_count_channel_pattern`, `tw_count_channel_pattern`
-- Standard-Patterns: `📺 {count} YouTube Abos` / `🎮 {count} Twitch Follower`
+- Settings: `{prefix}_count_channel_id`, `{prefix}_count_channel_pattern` (prefix = yt/tw/ig/tt)
+- Standard-Patterns: `📺 {count} YouTube Abos` / `🎮 {count} Twitch Follower` / `📷 {count} Instagram Follower` / `🎵 {count} TikTok Follower`
 - `{count}` wird durch `format_count(total)` ersetzt (Punkt-Tausendertrennung)
 - `update_count_channel()` in `bot/scoreboard.py` – wird nach jedem Refresh und force_refresh aufgerufen
 
 ### API-Services
-- `YouTubeService` und `TwitchService` in `bot/services/`
-- Beide nutzen `aiohttp.ClientSession` (lazy erstellt)
-- Beide akzeptieren URLs, Handles und IDs als Input (`parse_youtube_input`, `parse_twitch_input`)
-- Twitch nutzt Client-Credentials OAuth (App Access Token)
+- `YouTubeService`, `TwitchService`, `InstagramService`, `TikTokService` in `bot/services/`
+- Alle nutzen `aiohttp.ClientSession` (lazy erstellt)
+- Alle akzeptieren URLs, Handles und IDs/Usernames als Input
+- YouTube benötigt Data API v3 Key, Twitch nutzt Client-Credentials OAuth
+- **Instagram & TikTok benötigen keine API-Keys** (Public Web Scraping)
 - Methoden returnen `None` bei Fehlern (kein Exception-Raising)
-- **Rate-Limiting**: Beide Services nutzen `RateLimiter` (Token-Bucket) aus `bot/ratelimit.py`
+- **Rate-Limiting**: Alle Services nutzen `RateLimiter` (Token-Bucket) aus `bot/ratelimit.py`
 - **Twitch EventSub**: Optionaler WebSocket-Client (`bot/services/eventsub.py`) für Echtzeit-Channel-Updates
+- Instagram nutzt `get_channel_info()` → `{id, display_name, follower_count}`
+- TikTok nutzt `get_channel_info()` → `{id, display_name, follower_count}`
+- Beide verwenden Username als stabile ID (nicht numerisch)
 
 ### Konfiguration
-- `config.toml`: NUR Bot-Token und API-Keys (nicht per Command änderbar)
+- `config.toml`: NUR Bot-Token und API-Keys für YouTube/Twitch (nicht per Command änderbar)
+- Instagram & TikTok benötigen keine Keys in der Config
 - Optionale Keys: `dev_guild_id` (Entwicklungs-Sync), `enable_eventsub` (Echtzeit-Updates)
 - Alle anderen Einstellungen in `guild_settings`-Tabelle (per Slash-Command editierbar)
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
-- Count-Channel-Keys: `yt_count_channel_id`, `tw_count_channel_id`, `yt_count_channel_pattern`, `tw_count_channel_pattern`
+- Setting-Prefixe: `yt_` (YouTube), `tw_` (Twitch), `ig_` (Instagram), `tt_` (TikTok)
+- Count-Channel-Keys: `{prefix}_count_channel_id`, `{prefix}_count_channel_pattern`
 
 ## Git-Workflow
 
@@ -135,11 +146,9 @@ docs/
 class AdminCog(commands.GroupCog, group_name="admin"):
     ...
 
-# Plattform-Auswahl
-@app_commands.choices(platform=[
-    app_commands.Choice(name="YouTube", value="youtube"),
-    app_commands.Choice(name="Twitch", value="twitch"),
-])
+# Plattform-Auswahl (shared constant in bot/cogs/__init__.py)
+from bot.cogs import PLATFORM_CHOICES
+@app_commands.choices(platform=PLATFORM_CHOICES)
 
 # Rollen-Name bauen
 role_name, role_color = await compute_role_name_and_color(db, guild_id, platform, count, settings, platform_name)
@@ -152,7 +161,7 @@ await cleanup_unused_roles(guild, platform)
 | Tabelle | Zweck |
 |---|---|
 | `guild_settings` | Pro-Guild-Konfiguration (Channels, Intervalle, Default-Patterns, Count-Channels) |
-| `linked_accounts` | Discord-User ↔ YouTube/Twitch Mapping (multi-account, UNIQUE auf guild+user+platform+platform_id) |
+| `linked_accounts` | Discord-User ↔ Platform Mapping (multi-account, UNIQUE auf guild+user+platform+platform_id) |
 | `sub_history` | Zeitgestempelte Abo-/Follower-Snapshots (dedupliziert) |
 | `role_designs` | Benutzerdefinierte Rollen pro Bereich/exakter Zahl |
 | `scoreboard_messages` | Persistente Scoreboard-Message-IDs |

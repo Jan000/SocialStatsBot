@@ -14,6 +14,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.bot import SocialStatsBot
+from bot.cogs import PLATFORM_CHOICES
+from bot.roles import PLATFORM_SETTINGS_PREFIX
+from bot.database import ALL_PLATFORMS
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
             return []
 
         choices: list[app_commands.Choice[int]] = []
-        for plat in ("youtube", "twitch"):
+        for plat in ALL_PLATFORMS:
             designs = await self.bot.db.get_role_designs(guild_id, plat)
             for d in designs:
                 if d["exact_count"] is not None:
@@ -85,19 +88,15 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         description="Setzt den Scoreboard-Kanal für eine Plattform.",
     )
     @app_commands.describe(platform="Plattform", channel="Text-Kanal")
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def scoreboard_channel(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         channel: discord.TextChannel,
     ) -> None:
-        key = "yt_scoreboard_channel_id" if platform.value == "youtube" else "tw_scoreboard_channel_id"
+        prefix = PLATFORM_SETTINGS_PREFIX[platform.value]
+        key = f"{prefix}_scoreboard_channel_id"
         await self.bot.db.update_guild_setting(interaction.guild_id, key, channel.id)
         await interaction.response.send_message(
             f"✅ {platform.name} Scoreboard-Kanal auf {channel.mention} gesetzt.",
@@ -111,19 +110,15 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         description="Setzt das Aktualisierungs-Intervall (in Sekunden).",
     )
     @app_commands.describe(platform="Plattform", seconds="Intervall in Sekunden (min. 60)")
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def refresh_interval(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         seconds: app_commands.Range[int, 60, 86400],
     ) -> None:
-        key = "yt_refresh_interval" if platform.value == "youtube" else "tw_refresh_interval"
+        prefix = PLATFORM_SETTINGS_PREFIX[platform.value]
+        key = f"{prefix}_refresh_interval"
         await self.bot.db.update_guild_setting(interaction.guild_id, key, seconds)
         await interaction.response.send_message(
             f"✅ {platform.name} Refresh-Intervall auf **{seconds}s** gesetzt.",
@@ -140,12 +135,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         platform="Plattform",
         pattern="Pattern mit {name} und {count} (z.B. '{name} - {count} Abos')",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def role_pattern(
         self,
         interaction: discord.Interaction,
@@ -157,7 +147,8 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
                 "❌ Pattern muss `{count}` enthalten.", ephemeral=True
             )
             return
-        key = "yt_default_role_pattern" if platform.value == "youtube" else "tw_default_role_pattern"
+        prefix = PLATFORM_SETTINGS_PREFIX[platform.value]
+        key = f"{prefix}_default_role_pattern"
         await self.bot.db.update_guild_setting(interaction.guild_id, key, pattern)
         await interaction.response.send_message(
             f"✅ {platform.name} Rollen-Pattern auf `{pattern}` gesetzt.",
@@ -171,12 +162,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         description="Setzt die Standard-Rollenfarbe (Hex, z.B. FF0000).",
     )
     @app_commands.describe(platform="Plattform", hex_color="Farbe als Hex (z.B. FF0000)")
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def role_color(
         self,
         interaction: discord.Interaction,
@@ -191,7 +177,8 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
             )
             return
 
-        key = "yt_default_role_color" if platform.value == "youtube" else "tw_default_role_color"
+        prefix = PLATFORM_SETTINGS_PREFIX[platform.value]
+        key = f"{prefix}_default_role_color"
         await self.bot.db.update_guild_setting(interaction.guild_id, key, color_int)
         await interaction.response.send_message(
             f"✅ {platform.name} Rollenfarbe auf `#{color_int:06X}` gesetzt.",
@@ -205,19 +192,15 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         description="Setzt den Zähler-Kanal, dessen Name bei jedem Refresh aktualisiert wird.",
     )
     @app_commands.describe(platform="Plattform", channel="Voice- oder Text-Kanal")
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def count_channel(
         self,
         interaction: discord.Interaction,
         platform: app_commands.Choice[str],
         channel: discord.abc.GuildChannel,
     ) -> None:
-        key = f"{'yt' if platform.value == 'youtube' else 'tw'}_count_channel_id"
+        prefix = PLATFORM_SETTINGS_PREFIX[platform.value]
+        key = f"{prefix}_count_channel_id"
         await self.bot.db.update_guild_setting(interaction.guild_id, key, channel.id)
         await interaction.response.send_message(
             f"✅ {platform.name} Zähler-Kanal auf {channel.mention} gesetzt.\n"
@@ -235,12 +218,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         platform="Plattform",
         pattern="Pattern mit {count} (z.B. '📺 {count} YouTube Abos')",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def count_channel_pattern(
         self,
         interaction: discord.Interaction,
@@ -252,7 +230,8 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
                 "❌ Pattern muss `{count}` enthalten.", ephemeral=True
             )
             return
-        key = f"{'yt' if platform.value == 'youtube' else 'tw'}_count_channel_pattern"
+        prefix = PLATFORM_SETTINGS_PREFIX[platform.value]
+        key = f"{prefix}_count_channel_pattern"
         await self.bot.db.update_guild_setting(interaction.guild_id, key, pattern)
         await interaction.response.send_message(
             f"✅ {platform.name} Zähler-Pattern auf `{pattern}` gesetzt.",
@@ -272,12 +251,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         pattern="Rollen-Pattern mit {name} und {count}",
         hex_color="Farbe als Hex",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def role_design(
         self,
         interaction: discord.Interaction,
@@ -320,12 +294,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         pattern="Rollen-Pattern mit {name} und {count}",
         hex_color="Farbe als Hex",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def role_design_exact(
         self,
         interaction: discord.Interaction,
@@ -360,12 +329,7 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         description="Zeigt alle benutzerdefinierten Rollen-Designs.",
     )
     @app_commands.describe(platform="Plattform")
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def list_role_designs(
         self,
         interaction: discord.Interaction,

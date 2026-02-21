@@ -18,11 +18,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.bot import EXIT_CODE_UPDATE, SocialStatsBot
+from bot.cogs import PLATFORM_CHOICES, PLATFORM_COUNT_LABEL, PLATFORM_COLOUR_INT, PLATFORM_EMOJI
 from bot.roles import (
     compute_role_name_and_color,
     update_member_role,
     remove_account_roles,
     cleanup_unused_roles,
+    PLATFORM_SETTINGS_PREFIX,
 )
 from bot.scoreboard import update_count_channel, update_scoreboard
 from bot.pagination import PaginationView, paginate_lines
@@ -65,19 +67,14 @@ class AdminCog(commands.GroupCog, group_name="admin"):
 
     @app_commands.command(
         name="link",
-        description="Verknüpft einen YouTube- oder Twitch-Kanal mit einem Discord-User.",
+        description="Verknüpft einen Social-Media-Account mit einem Discord-User.",
     )
     @app_commands.describe(
         user="Discord-User",
         platform="Plattform",
         channel_input="Kanal (URL, @Handle, Login-Name oder ID)",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def link(
         self,
         interaction: discord.Interaction,
@@ -87,30 +84,17 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        if platform.value == "youtube":
-            info = await self.bot.youtube.resolve_channel(channel_input)
-            if info is None:
-                await interaction.followup.send(
-                    "❌ Konnte den YouTube-Kanal nicht finden. Prüfe die Eingabe.",
-                    ephemeral=True,
-                )
-                return
-            platform_id = info["id"]
-            platform_name = info["title"]
-            count = info["subscriber_count"]
-            count_label = "Abos"
-        else:
-            info = await self.bot.twitch.get_channel_info(channel_input)
-            if info is None:
-                await interaction.followup.send(
-                    "❌ Konnte den Twitch-Kanal nicht finden. Prüfe die Eingabe.",
-                    ephemeral=True,
-                )
-                return
-            platform_id = info["id"]
-            platform_name = info["display_name"]
-            count = info["follower_count"]
-            count_label = "Follower"
+        info = await self._resolve_platform(platform.value, channel_input)
+        if info is None:
+            await interaction.followup.send(
+                f"❌ Konnte den {platform.name}-Kanal nicht finden. Prüfe die Eingabe.",
+                ephemeral=True,
+            )
+            return
+        platform_id = info["id"]
+        platform_name = info["display_name"]
+        count = info.get("subscriber_count", info.get("follower_count", 0))
+        count_label = PLATFORM_COUNT_LABEL.get(platform.value, "Follower")
 
         await self.bot.db.link_account(
             interaction.guild_id, user.id, platform.value, platform_id, platform_name
@@ -144,12 +128,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         platform="Plattform",
         account_name="Name des Accounts (z.B. Niruki)",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def unlink(
         self,
         interaction: discord.Interaction,
@@ -204,32 +183,38 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        yt_accounts = await self.bot.db.get_linked_accounts_for_user(
-            interaction.guild_id, user.id, "youtube"
-        )
-        tw_accounts = await self.bot.db.get_linked_accounts_for_user(
-            interaction.guild_id, user.id, "twitch"
-        )
+        from bot.database import ALL_PLATFORMS
 
-        if not yt_accounts and not tw_accounts:
+        all_accounts: dict[str, list[dict]] = {}
+        for plat in ALL_PLATFORMS:
+            accs = await self.bot.db.get_linked_accounts_for_user(
+                interaction.guild_id, user.id, plat
+            )
+            if accs:
+                all_accounts[plat] = accs
+
+        if not all_accounts:
             await interaction.followup.send(
                 f"Keine Accounts für {user.mention} verknüpft.", ephemeral=True
             )
             return
 
         lines: list[str] = []
-        if yt_accounts:
-            lines.append("📺 **YouTube:**")
-            for acc in yt_accounts:
-                count = f"{acc['current_count']:,}".replace(",", ".")
-                lines.append(f"  • {acc['platform_name']} – {count} Abos")
-        if tw_accounts:
-            if lines:
-                lines.append("")
-            lines.append("🎮 **Twitch:**")
-            for acc in tw_accounts:
-                count = f"{acc['current_count']:,}".replace(",", ".")
-                lines.append(f"  • {acc['platform_name']} – {count} Follower")
+        platform_meta = [
+            ("youtube", "YouTube", "📺", "Abos"),
+            ("twitch", "Twitch", "🎮", "Follower"),
+            ("instagram", "Instagram", "📷", "Follower"),
+            ("tiktok", "TikTok", "🎵", "Follower"),
+        ]
+        for plat, label, emoji, count_label in platform_meta:
+            accs = all_accounts.get(plat)
+            if accs:
+                if lines:
+                    lines.append("")
+                lines.append(f"{emoji} **{label}:**")
+                for acc in accs:
+                    count = f"{acc['current_count']:,}".replace(",", ".")
+                    lines.append(f"  • {acc['platform_name']} – {count} {count_label}")
 
         chunks = paginate_lines(lines, per_page=15)
         pages: list[discord.Embed] = []
@@ -254,14 +239,9 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         description="Erzwingt eine sofortige Aktualisierung aller Accounts.",
     )
     @app_commands.describe(
-        platform="Plattform (optional, sonst beide)",
+        platform="Plattform (optional, sonst alle)",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def force_refresh(
         self,
         interaction: discord.Interaction,
@@ -269,7 +249,8 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        platforms = [platform.value] if platform else ["youtube", "twitch"]
+        from bot.database import ALL_PLATFORMS
+        platforms = [platform.value] if platform else list(ALL_PLATFORMS)
         total_updated = 0
 
         for plat in platforms:
@@ -322,12 +303,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         platform="Plattform",
         account_name="Account-Name",
     )
-    @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ]
-    )
+    @app_commands.choices(platform=PLATFORM_CHOICES)
     async def history(
         self,
         interaction: discord.Interaction,
@@ -354,7 +330,8 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             await interaction.followup.send("Keine Historie vorhanden.", ephemeral=True)
             return
 
-        label = "Abos" if platform.value == "youtube" else "Follower"
+        label = PLATFORM_COUNT_LABEL.get(platform.value, "Follower")
+        colour = PLATFORM_COLOUR_INT.get(platform.value, 0)
         lines: list[str] = []
         for e in entries:
             ts = datetime.fromtimestamp(e["recorded_at"], tz=timezone.utc)
@@ -367,7 +344,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             embed = discord.Embed(
                 title=f"📊 Historie – {account['platform_name']} ({platform.name})",
                 description="\n".join(chunk),
-                colour=discord.Colour(0xFF0000) if platform.value == "youtube" else discord.Colour(0x6441A4),
+                colour=discord.Colour(colour),
             )
             embed.set_footer(text=f"Seite {i+1}/{len(chunks)} • {len(entries)} Einträge")
             pages.append(embed)
@@ -390,8 +367,44 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         """Fetch the current count for an account."""
         if platform == "youtube":
             return await self.bot.youtube.get_subscriber_count(account["platform_id"])
-        else:
+        elif platform == "twitch":
             return await self.bot.twitch.get_follower_count(account["platform_id"])
+        elif platform == "instagram":
+            return await self.bot.instagram.get_follower_count(account["platform_id"])
+        elif platform == "tiktok":
+            return await self.bot.tiktok.get_follower_count(account["platform_id"])
+        return None
+
+    async def _resolve_platform(self, platform: str, user_input: str) -> dict | None:
+        """Resolve user input into a normalised info dict for the given platform.
+
+        Returns dict with id, display_name, follower_count (or subscriber_count
+        for YouTube), or None on error.
+        """
+        if platform == "youtube":
+            info = await self.bot.youtube.resolve_channel(user_input)
+            if info is None:
+                return None
+            return {
+                "id": info["id"],
+                "display_name": info["title"],
+                "subscriber_count": info["subscriber_count"],
+                "follower_count": info["subscriber_count"],
+            }
+        elif platform == "twitch":
+            info = await self.bot.twitch.get_channel_info(user_input)
+            if info is None:
+                return None
+            return {
+                "id": info["id"],
+                "display_name": info["display_name"],
+                "follower_count": info["follower_count"],
+            }
+        elif platform == "instagram":
+            return await self.bot.instagram.get_channel_info(user_input)
+        elif platform == "tiktok":
+            return await self.bot.tiktok.get_channel_info(user_input)
+        return None
 
     # ── Error handler ────────────────────────────────────────────────
 

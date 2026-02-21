@@ -227,3 +227,76 @@ async def test_scoreboard_message(db: Database):
     await db.set_scoreboard_message_ids(1, "youtube", 999, [12345, 67890])
     ids = await db.get_scoreboard_message_ids(1, "youtube")
     assert ids == [12345, 67890]
+
+
+# ── Instagram & TikTok platform tests ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_link_instagram_account(db: Database):
+    """Instagram accounts should link and retrieve correctly."""
+    await db.link_account(1, 100, "instagram", "niruki", "Niruki")
+    acc = await db.get_linked_account(1, 100, "instagram", "niruki")
+    assert acc is not None
+    assert acc["platform_name"] == "Niruki"
+    assert acc["current_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_link_tiktok_account(db: Database):
+    """TikTok accounts should link and retrieve correctly."""
+    await db.link_account(1, 100, "tiktok", "niruki", "Niruki")
+    acc = await db.get_linked_account(1, 100, "tiktok", "niruki")
+    assert acc is not None
+    assert acc["platform_name"] == "Niruki"
+    assert acc["current_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_all_four_platforms(db: Database):
+    """A user should be able to link accounts across all four platforms."""
+    await db.link_account(1, 100, "youtube", "UC123", "YT")
+    await db.link_account(1, 100, "twitch", "T123", "TW")
+    await db.link_account(1, 100, "instagram", "ig_user", "IG")
+    await db.link_account(1, 100, "tiktok", "tt_user", "TT")
+
+    for plat in ("youtube", "twitch", "instagram", "tiktok"):
+        accs = await db.get_linked_accounts_for_user(1, 100, plat)
+        assert len(accs) == 1, f"Expected 1 account for {plat}"
+
+
+@pytest.mark.asyncio
+async def test_instagram_guild_settings(db: Database):
+    """Instagram-specific guild settings should be accessible."""
+    settings = await db.get_guild_settings(1)
+    assert settings.get("ig_refresh_interval") == 600
+    await db.update_guild_setting(1, "ig_refresh_interval", 300)
+    settings = await db.get_guild_settings(1)
+    assert settings["ig_refresh_interval"] == 300
+
+
+@pytest.mark.asyncio
+async def test_tiktok_guild_settings(db: Database):
+    """TikTok-specific guild settings should be accessible."""
+    settings = await db.get_guild_settings(1)
+    assert settings.get("tt_refresh_interval") == 600
+    await db.update_guild_setting(1, "tt_scoreboard_channel_id", 42)
+    settings = await db.get_guild_settings(1)
+    assert settings["tt_scoreboard_channel_id"] == 42
+
+
+@pytest.mark.asyncio
+async def test_role_design_instagram(db: Database):
+    """Role designs should work for Instagram platform."""
+    await db.set_role_design(1, "instagram", "📷 {name} - {count}", 0xDB4A76, range_min=100)
+    design = await db.get_role_design_for_count(1, "instagram", 500)
+    assert design is not None
+    assert design["role_pattern"] == "📷 {name} - {count}"
+
+
+@pytest.mark.asyncio
+async def test_scoreboard_message_tiktok(db: Database):
+    """Scoreboard messages should work for TikTok platform."""
+    await db.set_scoreboard_message_ids(1, "tiktok", 999, [11111])
+    ids = await db.get_scoreboard_message_ids(1, "tiktok")
+    assert ids == [11111]

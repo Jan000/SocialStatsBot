@@ -96,3 +96,52 @@ async def test_compute_exact_beats_range(db: Database):
     name, color = await compute_role_name_and_color(db, 1, "youtube", 500, settings, "B")
     assert name == "[YouTube] Exact B"
     assert color == 0xFF
+
+
+# ── Instagram & TikTok role tests ────────────────────────────────
+
+
+def test_build_role_name_instagram():
+    result = build_role_name("instagram", "{name} - {count} Follower", 5000, "Niruki")
+    assert result == "[Instagram] Niruki - 5.000 Follower"
+
+
+def test_build_role_name_tiktok():
+    result = build_role_name("tiktok", "{name} - {count} Follower", 12345, "Niruki")
+    assert result == "[TikTok] Niruki - 12.345 Follower"
+
+
+@pytest.mark.asyncio
+async def test_compute_instagram_default(db: Database):
+    settings = await db.get_guild_settings(1)
+    name, color = await compute_role_name_and_color(db, 1, "instagram", 2000, settings, "TestIG")
+    expected_pattern = settings.get("ig_default_role_pattern", "{name} - {count}")
+    expected = build_role_name("instagram", expected_pattern, 2000, "TestIG")
+    assert name == expected
+
+
+@pytest.mark.asyncio
+async def test_compute_tiktok_default(db: Database):
+    settings = await db.get_guild_settings(1)
+    name, color = await compute_role_name_and_color(db, 1, "tiktok", 3000, settings, "TestTT")
+    expected_pattern = settings.get("tt_default_role_pattern", "{name} - {count}")
+    expected = build_role_name("tiktok", expected_pattern, 3000, "TestTT")
+    assert name == expected
+
+
+@pytest.mark.asyncio
+async def test_compute_instagram_exact_design(db: Database):
+    settings = await db.get_guild_settings(1)
+    await db.set_role_design(1, "instagram", "📷 {name} {count}", 0xDB4A76, exact_count=10000)
+    name, color = await compute_role_name_and_color(db, 1, "instagram", 10000, settings, "IG")
+    assert name == "[Instagram] 📷 IG 10.000"
+    assert color == 0xDB4A76
+
+
+@pytest.mark.asyncio
+async def test_compute_tiktok_range_design(db: Database):
+    settings = await db.get_guild_settings(1)
+    await db.set_role_design(1, "tiktok", "🎵 {name}", 0x000000, range_min=1000, range_max=9999)
+    name, color = await compute_role_name_and_color(db, 1, "tiktok", 5000, settings, "TT")
+    assert name == "[TikTok] 🎵 TT"
+    assert color == 0x000000

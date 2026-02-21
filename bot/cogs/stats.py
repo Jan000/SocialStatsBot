@@ -15,6 +15,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.bot import SocialStatsBot
+from bot.cogs import PLATFORM_CHOICES, PLATFORM_EMOJI, PLATFORM_COUNT_LABEL, PLATFORM_COLOUR_INT
 from bot.roles import format_count
 
 log = logging.getLogger(__name__)
@@ -70,10 +71,7 @@ class StatsCog(commands.GroupCog, group_name="stats"):
         period="Zeitraum",
     )
     @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ],
+        platform=PLATFORM_CHOICES,
         period=PERIOD_CHOICES,
     )
     async def growth(
@@ -121,15 +119,15 @@ class StatsCog(commands.GroupCog, group_name="stats"):
         else:
             pct_str = "n/a"
 
-        label = "Abos" if platform.value == "youtube" else "Follower"
-        emoji = "📺" if platform.value == "youtube" else "🎮"
+        label = PLATFORM_COUNT_LABEL.get(platform.value, "Follower")
+        emoji = PLATFORM_EMOJI.get(platform.value, "📊")
         sign = "+" if diff >= 0 else ""
 
         oldest_ts = datetime.fromtimestamp(oldest["recorded_at"], tz=timezone.utc)
 
         embed = discord.Embed(
             title=f"{emoji} Wachstum – {account['platform_name']} ({platform.name})",
-            colour=discord.Colour(0xFF0000) if platform.value == "youtube" else discord.Colour(0x6441A4),
+            colour=discord.Colour(PLATFORM_COLOUR_INT.get(platform.value, 0)),
         )
         embed.add_field(name="Zeitraum", value=f"Letzte **{days} Tage**", inline=True)
         embed.add_field(name=f"Aktuell", value=f"**{format_count(current)}** {label}", inline=True)
@@ -157,10 +155,7 @@ class StatsCog(commands.GroupCog, group_name="stats"):
         period="Zeitraum",
     )
     @app_commands.choices(
-        platform=[
-            app_commands.Choice(name="YouTube", value="youtube"),
-            app_commands.Choice(name="Twitch", value="twitch"),
-        ],
+        platform=PLATFORM_CHOICES,
         period=PERIOD_CHOICES,
     )
     async def overview(
@@ -173,8 +168,8 @@ class StatsCog(commands.GroupCog, group_name="stats"):
 
         days = period.value if period else 30
         since = time.time() - (days * 86400)
-        label = "Abos" if platform.value == "youtube" else "Follower"
-        emoji = "📺" if platform.value == "youtube" else "🎮"
+        label = PLATFORM_COUNT_LABEL.get(platform.value, "Follower")
+        emoji = PLATFORM_EMOJI.get(platform.value, "📊")
 
         accounts = await self.bot.db.get_all_linked(interaction.guild_id, platform.value)
         if not accounts:
@@ -210,7 +205,7 @@ class StatsCog(commands.GroupCog, group_name="stats"):
         embed = discord.Embed(
             title=f"{emoji} {platform.name} Übersicht – Letzte {days} Tage",
             description="\n".join(lines),
-            colour=discord.Colour(0xFF0000) if platform.value == "youtube" else discord.Colour(0x6441A4),
+            colour=discord.Colour(PLATFORM_COLOUR_INT.get(platform.value, 0)),
         )
         embed.set_footer(text=f"{len(accounts)} Account(s)")
 

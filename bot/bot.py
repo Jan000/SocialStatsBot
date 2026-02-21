@@ -16,6 +16,8 @@ from bot.database import Database
 from bot.services.youtube import YouTubeService
 from bot.services.twitch import TwitchService
 from bot.services.eventsub import TwitchEventSub
+from bot.services.instagram import InstagramService
+from bot.services.tiktok import TikTokService
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ class SocialStatsBot(commands.Bot):
     db: Database
     youtube: YouTubeService
     twitch: TwitchService
+    instagram: InstagramService
+    tiktok: TikTokService
     eventsub: TwitchEventSub | None
     dev_guild_id: int | None
     exit_code: int  # set to EXIT_CODE_UPDATE for update-then-restart
@@ -49,6 +53,8 @@ class SocialStatsBot(commands.Bot):
         self.db = Database()
         self.youtube = YouTubeService(youtube_api_key)
         self.twitch = TwitchService(twitch_client_id, twitch_client_secret)
+        self.instagram = InstagramService()
+        self.tiktok = TikTokService()
         self.dev_guild_id = dev_guild_id
         self._enable_eventsub = enable_eventsub
         self.eventsub = None
@@ -118,6 +124,8 @@ class SocialStatsBot(commands.Bot):
             await self.eventsub.stop()
         await self.youtube.close()
         await self.twitch.close()
+        await self.instagram.close()
+        await self.tiktok.close()
         await self.db.close()
         await super().close()
 

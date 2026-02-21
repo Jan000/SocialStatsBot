@@ -2,8 +2,10 @@
 Role management – create, assign, and cleanup bot-managed roles.
 
 Role prefixes:
-  [YouTube]  for YouTube accounts
-  [Twitch]   for Twitch accounts
+  [YouTube]    for YouTube accounts
+  [Twitch]     for Twitch accounts
+  [Instagram]  for Instagram accounts
+  [TikTok]     for TikTok accounts
 
 Role name format: "[Platform] {pattern}" where pattern uses {name} and {count}.
 """
@@ -22,6 +24,15 @@ log = logging.getLogger(__name__)
 PLATFORM_PREFIX = {
     "youtube": "[YouTube] ",
     "twitch": "[Twitch] ",
+    "instagram": "[Instagram] ",
+    "tiktok": "[TikTok] ",
+}
+
+PLATFORM_SETTINGS_PREFIX = {
+    "youtube": "yt",
+    "twitch": "tw",
+    "instagram": "ig",
+    "tiktok": "tt",
 }
 
 
@@ -61,7 +72,7 @@ async def compute_role_name_and_color(
             design["role_color"],
         )
 
-    prefix = "yt" if platform == "youtube" else "tw"
+    prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
     pattern = settings.get(f"{prefix}_default_role_pattern", "{name} - {count}")
     color = settings.get(f"{prefix}_default_role_color", 0)
     return build_role_name(platform, pattern, count, platform_name), color

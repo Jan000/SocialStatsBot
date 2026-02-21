@@ -10,10 +10,12 @@ import discord
 from discord.ext import commands, tasks
 
 from bot.bot import SocialStatsBot
+from bot.database import ALL_PLATFORMS
 from bot.roles import (
     compute_role_name_and_color,
     update_member_role,
     cleanup_unused_roles,
+    PLATFORM_SETTINGS_PREFIX,
 )
 from bot.scoreboard import update_count_channel, update_scoreboard
 
@@ -54,8 +56,8 @@ class RefreshCog(commands.Cog):
     async def _refresh_guild(self, guild: discord.Guild) -> None:
         settings = await self.bot.db.get_guild_settings(guild.id)
 
-        for platform in ("youtube", "twitch"):
-            prefix = "yt" if platform == "youtube" else "tw"
+        for platform in ALL_PLATFORMS:
+            prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
             interval = settings.get(f"{prefix}_refresh_interval", 600)
 
             accounts = await self.bot.db.get_accounts_due_refresh(
@@ -103,8 +105,13 @@ class RefreshCog(commands.Cog):
     async def _fetch_count(self, platform: str, account: dict) -> int | None:
         if platform == "youtube":
             return await self.bot.youtube.get_subscriber_count(account["platform_id"])
-        else:
+        elif platform == "twitch":
             return await self.bot.twitch.get_follower_count(account["platform_id"])
+        elif platform == "instagram":
+            return await self.bot.instagram.get_follower_count(account["platform_id"])
+        elif platform == "tiktok":
+            return await self.bot.tiktok.get_follower_count(account["platform_id"])
+        return None
 
     async def _bootstrap_eventsub(self) -> None:
         """Subscribe all existing Twitch accounts to EventSub on startup."""

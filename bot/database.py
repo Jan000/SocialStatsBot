@@ -21,28 +21,45 @@ log = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "bot.db"
 
+# All platforms the bot currently supports.
+ALL_PLATFORMS = ("youtube", "twitch", "instagram", "tiktok")
+
+_PLATFORM_CHECK = "platform IN ('youtube','twitch','instagram','tiktok')"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id          INTEGER PRIMARY KEY,
     yt_scoreboard_channel_id   INTEGER DEFAULT 0,
     tw_scoreboard_channel_id   INTEGER DEFAULT 0,
+    ig_scoreboard_channel_id   INTEGER DEFAULT 0,
+    tt_scoreboard_channel_id   INTEGER DEFAULT 0,
     yt_refresh_interval        INTEGER DEFAULT 600,
     tw_refresh_interval        INTEGER DEFAULT 600,
+    ig_refresh_interval        INTEGER DEFAULT 600,
+    tt_refresh_interval        INTEGER DEFAULT 600,
     yt_default_role_pattern    TEXT    DEFAULT '{name} - {count} Abos',
     tw_default_role_pattern    TEXT    DEFAULT '{name} - {count} Follower',
+    ig_default_role_pattern    TEXT    DEFAULT '{name} - {count} Follower',
+    tt_default_role_pattern    TEXT    DEFAULT '{name} - {count} Follower',
     yt_default_role_color      INTEGER DEFAULT 16711680,
     tw_default_role_color      INTEGER DEFAULT 6570404,
+    ig_default_role_color      INTEGER DEFAULT 14372966,
+    tt_default_role_color      INTEGER DEFAULT 0,
     yt_count_channel_id        INTEGER DEFAULT 0,
     tw_count_channel_id        INTEGER DEFAULT 0,
+    ig_count_channel_id        INTEGER DEFAULT 0,
+    tt_count_channel_id        INTEGER DEFAULT 0,
     yt_count_channel_pattern   TEXT    DEFAULT '📺 {count} YouTube Abos',
-    tw_count_channel_pattern   TEXT    DEFAULT '🎮 {count} Twitch Follower'
+    tw_count_channel_pattern   TEXT    DEFAULT '🎮 {count} Twitch Follower',
+    ig_count_channel_pattern   TEXT    DEFAULT '📷 {count} Instagram Follower',
+    tt_count_channel_pattern   TEXT    DEFAULT '🎵 {count} TikTok Follower'
 );
 
 CREATE TABLE IF NOT EXISTS linked_accounts (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id        INTEGER NOT NULL,
     discord_user_id INTEGER NOT NULL,
-    platform        TEXT    NOT NULL CHECK(platform IN ('youtube', 'twitch')),
+    platform        TEXT    NOT NULL,
     platform_id     TEXT    NOT NULL,
     platform_name   TEXT    DEFAULT '',
     current_count   INTEGER DEFAULT 0,
@@ -64,7 +81,7 @@ CREATE TABLE IF NOT EXISTS sub_history (
 CREATE TABLE IF NOT EXISTS role_designs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id        INTEGER NOT NULL,
-    platform        TEXT    NOT NULL CHECK(platform IN ('youtube', 'twitch')),
+    platform        TEXT    NOT NULL,
     range_min       INTEGER NOT NULL,
     range_max       INTEGER,
     exact_count     INTEGER,
@@ -75,7 +92,7 @@ CREATE TABLE IF NOT EXISTS role_designs (
 
 CREATE TABLE IF NOT EXISTS scoreboard_messages (
     guild_id        INTEGER NOT NULL,
-    platform        TEXT    NOT NULL CHECK(platform IN ('youtube', 'twitch')),
+    platform        TEXT    NOT NULL,
     channel_id      INTEGER NOT NULL,
     message_id      INTEGER NOT NULL,
     PRIMARY KEY (guild_id, platform)
@@ -121,7 +138,7 @@ class Database:
                             id              INTEGER PRIMARY KEY AUTOINCREMENT,
                             guild_id        INTEGER NOT NULL,
                             discord_user_id INTEGER NOT NULL,
-                            platform        TEXT    NOT NULL CHECK(platform IN ('youtube', 'twitch')),
+                            platform        TEXT    NOT NULL,
                             platform_id     TEXT    NOT NULL,
                             platform_name   TEXT    DEFAULT '',
                             current_count   INTEGER DEFAULT 0,
@@ -160,6 +177,20 @@ class Database:
                 ("tw_count_channel_id", "INTEGER DEFAULT 0"),
                 ("yt_count_channel_pattern", "TEXT DEFAULT '📺 {count} YouTube Abos'"),
                 ("tw_count_channel_pattern", "TEXT DEFAULT '🎮 {count} Twitch Follower'"),
+                # Instagram columns
+                ("ig_scoreboard_channel_id", "INTEGER DEFAULT 0"),
+                ("ig_refresh_interval", "INTEGER DEFAULT 600"),
+                ("ig_default_role_pattern", "TEXT DEFAULT '{name} - {count} Follower'"),
+                ("ig_default_role_color", "INTEGER DEFAULT 14372966"),
+                ("ig_count_channel_id", "INTEGER DEFAULT 0"),
+                ("ig_count_channel_pattern", "TEXT DEFAULT '📷 {count} Instagram Follower'"),
+                # TikTok columns
+                ("tt_scoreboard_channel_id", "INTEGER DEFAULT 0"),
+                ("tt_refresh_interval", "INTEGER DEFAULT 600"),
+                ("tt_default_role_pattern", "TEXT DEFAULT '{name} - {count} Follower'"),
+                ("tt_default_role_color", "INTEGER DEFAULT 0"),
+                ("tt_count_channel_id", "INTEGER DEFAULT 0"),
+                ("tt_count_channel_pattern", "TEXT DEFAULT '🎵 {count} TikTok Follower'"),
             ]:
                 if col not in gs_cols:
                     log.info("Adding %s column to guild_settings...", col)
@@ -180,6 +211,63 @@ class Database:
                 WHERE tw_default_role_pattern = '{count} Twitch Follower'
             """)
             await self.db.commit()
+
+            # Migration: remove CHECK(platform IN ('youtube','twitch'))
+            # constraints to allow instagram/tiktok.  SQLite requires
+            # recreating the table to drop a CHECK.
+            for table_name, create_sql in [
+                ("linked_accounts", """
+                    CREATE TABLE linked_accounts (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id        INTEGER NOT NULL,
+                        discord_user_id INTEGER NOT NULL,
+                        platform        TEXT    NOT NULL,
+                        platform_id     TEXT    NOT NULL,
+                        platform_name   TEXT    DEFAULT '',
+                        current_count   INTEGER DEFAULT 0,
+                        last_refreshed  REAL    DEFAULT 0,
+                        last_status     TEXT    DEFAULT 'pending',
+                        UNIQUE(guild_id, discord_user_id, platform, platform_id)
+                    );
+                """),
+                ("role_designs", """
+                    CREATE TABLE role_designs (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        guild_id        INTEGER NOT NULL,
+                        platform        TEXT    NOT NULL,
+                        range_min       INTEGER NOT NULL,
+                        range_max       INTEGER,
+                        exact_count     INTEGER,
+                        role_pattern    TEXT    NOT NULL DEFAULT '{name} - {count} Abos',
+                        role_color      INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(guild_id, platform, range_min, range_max, exact_count)
+                    );
+                """),
+                ("scoreboard_messages", """
+                    CREATE TABLE scoreboard_messages (
+                        guild_id        INTEGER NOT NULL,
+                        platform        TEXT    NOT NULL,
+                        channel_id      INTEGER NOT NULL,
+                        message_id      INTEGER NOT NULL,
+                        PRIMARY KEY (guild_id, platform)
+                    );
+                """),
+            ]:
+                # Check if a CHECK constraint still exists
+                async with self.db.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                    (table_name,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and "CHECK" in (row[0] or ""):
+                    log.info("Removing CHECK constraint from %s …", table_name)
+                    await self.db.executescript(f"""
+                        ALTER TABLE {table_name} RENAME TO _{table_name}_old;
+                        {create_sql}
+                        INSERT INTO {table_name} SELECT * FROM _{table_name}_old;
+                        DROP TABLE _{table_name}_old;
+                    """)
+                    await self.db.commit()
 
         except Exception as e:
             log.warning("Migration check failed (may be fine for fresh DB): %s", e)
@@ -213,16 +301,28 @@ class Database:
         allowed = {
             "yt_scoreboard_channel_id",
             "tw_scoreboard_channel_id",
+            "ig_scoreboard_channel_id",
+            "tt_scoreboard_channel_id",
             "yt_refresh_interval",
             "tw_refresh_interval",
+            "ig_refresh_interval",
+            "tt_refresh_interval",
             "yt_default_role_pattern",
             "tw_default_role_pattern",
+            "ig_default_role_pattern",
+            "tt_default_role_pattern",
             "yt_default_role_color",
             "tw_default_role_color",
+            "ig_default_role_color",
+            "tt_default_role_color",
             "yt_count_channel_id",
             "tw_count_channel_id",
+            "ig_count_channel_id",
+            "tt_count_channel_id",
             "yt_count_channel_pattern",
             "tw_count_channel_pattern",
+            "ig_count_channel_pattern",
+            "tt_count_channel_pattern",
         }
         if key not in allowed:
             raise ValueError(f"Unknown setting: {key}")

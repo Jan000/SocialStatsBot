@@ -1,10 +1,11 @@
 # Social-Stats-Bot
 
-Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als Discord-Rollen anzeigt und Scoreboards pflegt.
+Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und TikTok-Follower trackt, als Discord-Rollen anzeigt und Scoreboards pflegt.
 
 ## Features
 
-- **YouTube & Twitch Account-Verknüpfung** – Multi-Account-Support (mehrere Accounts pro User & Plattform)
+- **4-Plattform-Support** – YouTube, Twitch, Instagram & TikTok
+- **Account-Verknüpfung** – Multi-Account-Support (mehrere Accounts pro User & Plattform)
 - **Automatische Rollen** – Jeder Account bekommt eine eigene Rolle (z.B. `[YouTube] MeinKanal - 1.234 Abos`)
 - **Scoreboards** – Leaderboards in konfigurierbaren Channels, auto-aktualisiert (alle Accounts, auto-split bei langen Listen)
 - **Count-Channel** – Ein Channel pro Plattform, dessen Name bei jedem Refresh auf die aktuelle Gesamtzahl aktualisiert wird (z.B. `📺 1.234 YouTube Abos`)
@@ -16,7 +17,7 @@ Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als D
 - **Twitch EventSub** – Optionale WebSocket-Integration für Echtzeit-Channel-Updates
 - **Docker-Support** – Deployment via `docker compose up`
 - **Historien-Tracking** – Alle Änderungen dedupliziert in SQLite gespeichert
-- **Flexible Eingabe** – YouTube-URLs, @Handles, Channel-IDs sowie Twitch-URLs und Login-Namen
+- **Flexible Eingabe** – YouTube-URLs, @Handles, Channel-IDs sowie Twitch-URLs, Login-Namen, Instagram-URLs/Usernames und TikTok-URLs/Usernames
 - **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert
 
 ## Setup
@@ -30,6 +31,7 @@ Ein Discord-Bot, der YouTube-Abonnenten und Twitch-Follower-Zahlen trackt, als D
    - Discord Bot Token
    - YouTube API Key
    - Twitch Client ID & Secret
+   - (Instagram & TikTok benötigen keine API-Keys)
 4. Bot starten:
    ```bash
    python main.py
@@ -65,7 +67,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 
 | Command | Beschreibung |
 |---|---|
-| `/admin link <user> <platform> <channel_input>` | YouTube-/Twitch-Kanal verknüpfen (URL, Handle, Login oder ID) |
+| `/admin link <user> <platform> <channel_input>` | Account verknüpfen (YouTube/Twitch/Instagram/TikTok – URL, Handle, Login oder ID) |
 | `/admin unlink <user> <platform> <account_name>` | Bestimmten Account entfernen (Autocomplete) |
 | `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen (paginiert) |
 | `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |
@@ -98,6 +100,8 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 Rollen werden automatisch erstellt und zugewiesen. Jeder verknüpfte Account bekommt seine eigene Rolle:
 - YouTube: `[YouTube] {name} - {count} Abos` (z.B. `[YouTube] MeinKanal - 1.234 Abos`)
 - Twitch: `[Twitch] {name} - {count} Follower` (z.B. `[Twitch] MeinKanal - 567 Follower`)
+- Instagram: `[Instagram] {name} - {count} Follower`
+- TikTok: `[TikTok] {name} - {count} Follower`
 
 Platzhalter im Pattern:
 - `{name}` – Account-/Kanal-Name
@@ -111,6 +115,8 @@ Ein optionaler Voice- oder Text-Channel pro Plattform, dessen Name bei jedem Ref
 
 - Standard-Pattern YouTube: `📺 {count} YouTube Abos`
 - Standard-Pattern Twitch: `🎮 {count} Twitch Follower`
+- Standard-Pattern Instagram: `📷 {count} Instagram Follower`
+- Standard-Pattern TikTok: `🎵 {count} TikTok Follower`
 - Platzhalter: `{count}` – Gesamtzahl aller Accounts (mit Punkt-Tausendertrennung)
 - Konfigurierbar über `/settings count_channel` und `/settings count_channel_pattern`
 
@@ -120,7 +126,7 @@ Ein optionaler Voice- oder Text-Channel pro Plattform, dessen Name bei jedem Ref
 pytest tests/ -v
 ```
 
-31 Tests für Database-Layer und Role-Logic.
+44 Tests für Database-Layer und Role-Logic.
 
 ## Projektstruktur
 
@@ -140,6 +146,7 @@ pytest tests/ -v
 │   ├── pagination.py        # PaginationView (Discord-Buttons)
 │   ├── ratelimit.py         # Token-Bucket Rate-Limiter
 │   ├── cogs/
+│   │   ├── __init__.py       # Shared platform constants
 │   │   ├── admin.py         # Admin-Commands (Link/Unlink/Accounts/History)
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   ├── stats.py         # Statistik-Commands (Growth/Overview)
@@ -147,10 +154,12 @@ pytest tests/ -v
 │   └── services/
 │       ├── youtube.py        # YouTube Data API v3 (rate-limited)
 │       ├── twitch.py         # Twitch Helix API + OAuth (rate-limited)
+│       ├── instagram.py      # Instagram Public Web API (rate-limited)
+│       ├── tiktok.py         # TikTok HTML Scraping (rate-limited)
 │       └── eventsub.py       # Twitch EventSub WebSocket-Client
 ├── tests/
-│   ├── test_database.py     # 20 Database-Tests
-│   └── test_roles.py        # 11 Role-Logic-Tests
+│   ├── test_database.py     # 27 Database-Tests
+│   └── test_roles.py        # 17 Role-Logic-Tests
 ├── data/                    # SQLite DB (auto-erstellt)
 └── docs/
     └── todos.md             # Aufgaben
@@ -161,12 +170,12 @@ pytest tests/ -v
 **Phase:** Feature-Complete
 
 Alle geplanten Features sind implementiert:
-- Vollständige YouTube & Twitch API-Integration mit Rate-Limiting
+- Vollständige YouTube, Twitch, Instagram & TikTok Integration mit Rate-Limiting
 - Multi-Account-Verknüpfung, automatische Rollen, Scoreboards, Count-Channels
 - Statistik-Commands mit Wachstumsanalyse
 - Background-Refresh mit konfigurierbarem Intervall
 - Optionale Twitch EventSub WebSocket-Integration
-- 31 Unit-Tests (Database + Role-Logic)
+- 44 Unit-Tests (Database + Role-Logic)
 - Docker-Support für einfaches Deployment
 
 ### Architektur-Entscheidungen
@@ -176,7 +185,8 @@ Alle geplanten Features sind implementiert:
 | discord.py 2.x Slash-Commands | Moderner Standard, bessere UX |
 | aiosqlite | Async-kompatibel mit discord.py event loop |
 | Discord-native Permissions | Flexibler als eigenes Admin-System |
-| Multi-Account UNIQUE Constraint | Ein User kann mehrere YT/TW Accounts haben |
+| Multi-Account UNIQUE Constraint | Ein User kann mehrere Accounts pro Plattform haben |
+| Instagram/TikTok ohne API-Key | Public Web Scraping, kein Entwickler-Account nötig |
 | History-Deduplizierung | Reduziert DB-Größe bei gleichbleibendem Count |
 | Token-Bucket Rate-Limiting | Respektiert API-Quotas |
 | EventSub WebSocket (optional) | Echtzeit-Updates ohne öffentliche URL |

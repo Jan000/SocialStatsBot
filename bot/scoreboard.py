@@ -22,16 +22,39 @@ log = logging.getLogger(__name__)
 PLATFORM_LABELS = {
     "youtube": ("YouTube Abonnenten", "📺"),
     "twitch": ("Twitch Follower", "🎮"),
+    "instagram": ("Instagram Follower", "📷"),
+    "tiktok": ("TikTok Follower", "🎵"),
 }
 
 COUNT_LABEL = {
     "youtube": "Abos",
     "twitch": "Follower",
+    "instagram": "Follower",
+    "tiktok": "Follower",
 }
 
 PLATFORM_THUMBNAIL = {
     "youtube": "https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg",
     "twitch": "https://assets.twitch.tv/assets/favicon-32-e29e246c157142c94346.png",
+    "instagram": "https://www.instagram.com/static/images/ico/favicon-192.png/68d99ba29cc8.png",
+    "tiktok": "https://sf-tb-sg.ibytedtos.com/obj/eden-sg/uhtyvueh7nulogpoguhm/tiktok-icon2.png",
+}
+
+PLATFORM_COLOUR = {
+    "youtube": discord.Colour(0xFF0000),
+    "twitch": discord.Colour(0x6441A4),
+    "instagram": discord.Colour(0xDB4A76),
+    "tiktok": discord.Colour(0x000000),
+}
+
+# Import the settings-prefix mapping from roles.
+from bot.roles import PLATFORM_SETTINGS_PREFIX
+
+PLATFORM_COLOUR = {
+    "youtube": discord.Colour(0xFF0000),
+    "twitch": discord.Colour(0x6441A4),
+    "instagram": discord.Colour(0xDB4A76),
+    "tiktok": discord.Colour(0x000000),
 }
 
 # Discord hard-limit for a single embed description.
@@ -86,12 +109,9 @@ async def build_scoreboard_embeds(
     Discord message.
     """
     label, emoji = PLATFORM_LABELS.get(platform, (platform, "📊"))
-    prefix = "yt" if platform == "youtube" else "tw"
+    prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
     interval = settings.get(f"{prefix}_refresh_interval", 600)
-    colour = (
-        discord.Colour(0xFF0000) if platform == "youtube"
-        else discord.Colour(0x6441A4)
-    )
+    colour = PLATFORM_COLOUR.get(platform, discord.Colour.default())
 
     now = datetime.datetime.now(datetime.timezone.utc)
     now_ts = int(now.timestamp())
@@ -178,7 +198,7 @@ async def update_scoreboard(
     Handles 1-2 messages and cleans up surplus old messages when the
     scoreboard shrinks back to a single message.
     """
-    prefix = "yt" if platform == "youtube" else "tw"
+    prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
     channel_id = settings.get(f"{prefix}_scoreboard_channel_id", 0)
     if not channel_id:
         return
@@ -239,7 +259,7 @@ async def update_count_channel(
     The channel name is built from the guild's count_channel_pattern
     with ``{count}`` replaced by the formatted total.
     """
-    prefix = "yt" if platform == "youtube" else "tw"
+    prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
     channel_id = settings.get(f"{prefix}_count_channel_id", 0)
     if not channel_id:
         return
@@ -251,10 +271,9 @@ async def update_count_channel(
     accounts = await bot.db.get_all_linked(guild.id, platform)
     total = sum(a["current_count"] for a in accounts)
 
-    pattern = settings.get(
-        f"{prefix}_count_channel_pattern",
-        f"{'📺' if platform == 'youtube' else '🎮'} {{count}} {'YouTube Abos' if platform == 'youtube' else 'Twitch Follower'}",
-    )
+    default_label = PLATFORM_LABELS.get(platform, (platform, ""))
+    default_pattern = f"{default_label[1]} {{count}} {default_label[0]}"
+    pattern = settings.get(f"{prefix}_count_channel_pattern", default_pattern)
     new_name = pattern.replace("{count}", format_count(total))
 
     if channel.name != new_name:

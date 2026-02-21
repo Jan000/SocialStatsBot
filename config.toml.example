@@ -11,3 +11,4 @@ token = "YOUR_DISCORD_BOT_TOKEN"
 youtube_api_key = "YOUR_YOUTUBE_DATA_API_V3_KEY"
 twitch_client_id = "YOUR_TWITCH_CLIENT_ID"
 twitch_client_secret = "YOUR_TWITCH_CLIENT_SECRET"
+# Instagram and TikTok require no API keys (public web scraping)

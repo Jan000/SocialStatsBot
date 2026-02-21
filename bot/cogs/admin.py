@@ -144,7 +144,9 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         await update_member_role(
             interaction.guild, user, plat_key, platform_name, role_name, role_color
         )
-
+        # Update scoreboard & count-channel immediately (DB-only, no API re-fetch)
+        await update_scoreboard(self.bot, interaction.guild, plat_key, settings)
+        await update_count_channel(self.bot, interaction.guild, plat_key, settings)
         await interaction.followup.send(
             f"✅ **{platform_name}** ({plat_display}) mit {user.mention} verknüpft.\n"
             f"Aktuelle {count_label}: **{count:,}**".replace(",", "."),
@@ -191,7 +193,10 @@ class AdminCog(commands.GroupCog, group_name="admin"):
         # Remove account-specific roles
         await remove_account_roles(interaction.guild, user, platform.value, platform_name)
         await cleanup_unused_roles(interaction.guild, platform.value)
-
+        # Update scoreboard & count-channel immediately (DB-only, no API re-fetch)
+        settings = await self.bot.db.get_guild_settings(interaction.guild_id)
+        await update_scoreboard(self.bot, interaction.guild, platform.value, settings)
+        await update_count_channel(self.bot, interaction.guild, platform.value, settings)
         await interaction.followup.send(
             f"✅ **{platform_name}** ({platform.name}) von {user.mention} entfernt.",
             ephemeral=True,

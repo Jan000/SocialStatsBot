@@ -133,6 +133,10 @@ class RequestDecisionView(discord.ui.View):
                 )
                 await update_member_role(guild, member, platform, platform_name, role_name, role_color)
 
+                # Update scoreboard & count-channel immediately
+                await update_scoreboard(bot, guild, platform, settings)
+                await update_count_channel(bot, guild, platform, settings)
+
                 count_label = PLATFORM_COUNT_LABEL.get(platform, "Follower")
                 result_msg = (
                     f"✅ **{platform_name}** ({plat_display}) mit <@{req['discord_user_id']}> verknüpft. "
@@ -146,6 +150,12 @@ class RequestDecisionView(discord.ui.View):
                     guild.id, req["discord_user_id"], platform, platform_id,
                 )
                 await cleanup_unused_roles(guild, platform)
+
+                # Update scoreboard & count-channel immediately
+                settings = await bot.db.get_guild_settings(guild.id)
+                await update_scoreboard(bot, guild, platform, settings)
+                await update_count_channel(bot, guild, platform, settings)
+
                 result_msg = (
                     f"✅ **{platform_name}** ({plat_display}) von <@{req['discord_user_id']}> entfernt."
                 )

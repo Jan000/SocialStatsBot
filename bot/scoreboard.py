@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 
 import discord
 
@@ -46,6 +47,11 @@ from bot.roles import PLATFORM_SETTINGS_PREFIX
 
 # Discord hard-limit for a single embed description.
 _MAX_DESCRIPTION = 4096
+
+# Discord allows only 2 channel-renames per 10 minutes.  We enforce a
+# per-channel cooldown to prevent 429 storms.
+_CHANNEL_RENAME_COOLDOWN = 600  # seconds (10 min)
+_last_rename: dict[int, float] = {}  # channel_id -> monotonic timestamp
 
 
 def _format_interval(seconds: int) -> str:
@@ -276,8 +282,18 @@ async def update_count_channel(
     new_name = pattern.replace("{count}", format_count(total))
 
     if channel.name != new_name:
+        # Respect Discord's 2-per-10-min channel-rename rate limit.
+        last = _last_rename.get(channel_id, 0.0)
+        elapsed = time.monotonic() - last
+        if elapsed < _CHANNEL_RENAME_COOLDOWN:
+            log.debug(
+                "Skipping count-channel rename for %s (cooldown: %.0fs remaining)",
+                channel_id, _CHANNEL_RENAME_COOLDOWN - elapsed,
+            )
+            return
         try:
             await channel.edit(name=new_name)
+            _last_rename[channel_id] = time.monotonic()
         except (discord.Forbidden, discord.HTTPException) as exc:
             log.error(
                 "Cannot rename count channel %s in guild %s: %s",

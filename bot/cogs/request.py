@@ -188,8 +188,8 @@ class RequestDecisionView(discord.ui.View):
                     value=f"❌ Abgelehnt von {actor}",
                     inline=False,
                 )
-            # Disable buttons after decision
-            await interaction.message.edit(embed=new_embed, view=None)
+            # Remove buttons after decision
+            await interaction.message.edit(embed=new_embed, view=discord.ui.View())
 
         await interaction.followup.send(result_msg, ephemeral=True)
 

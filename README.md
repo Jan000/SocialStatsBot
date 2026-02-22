@@ -20,6 +20,7 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 - **Flexible Eingabe** – Usernames, URLs, @Handles und Channel-IDs werden überall akzeptiert (das `@` ist optional und wird automatisch ergänzt)
 - **Auto-Plattform-Erkennung** – Bei URL-Eingabe wird die Plattform automatisch erkannt (kein manuelles Auswählen nötig)
 - **User-Anfragen-System** – Normale User können Link/Unlink-Anfragen stellen, Admins bestätigen per Button. Link-Anfragen auch direkt über den Scoreboard-Button möglich.
+- **Admin-Status-Channel** – Konfigurierbarer Kanal mit detailliertem Bot-Status (Plattform-Health, Refresh-Zyklen, Fehler, Cooldowns), auto-aktualisiert (Standard: 30s)
 - **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert
 
 ## Setup
@@ -106,6 +107,8 @@ Für alle User zugänglich. Anfragen werden im konfigurierten Anfragen-Kanal gep
 | `/settings count_channel <platform> <channel>` | Count-Channel setzen (Voice-/Text-Channel, wird bei Refresh umbenannt) |
 | `/settings count_channel_pattern <platform> <pattern>` | Count-Channel-Pattern (`{count}` als Platzhalter) |
 | `/settings request_channel <channel>` | Anfragen-Kanal für User-Link/Unlink-Requests setzen |
+| `/settings status_channel <channel>` | Admin-Status-Kanal setzen (zeigt detaillierten Bot-Status) |
+| `/settings status_refresh_interval <seconds>` | Aktualisierungs-Intervall für den Status-Kanal (10–3600s, Standard: 30s) |
 
 ## Rollen-System
 
@@ -142,6 +145,21 @@ Normale User können über `/request link` und `/request unlink` Anfragen stelle
 
 Konfiguration: `/settings request_channel <channel>` setzt den Kanal für Anfragen.
 
+## Admin-Status-Channel
+
+Ein konfigurierbarer Text-Channel, in dem der Bot einen detaillierten Status aller Plattformen anzeigt und automatisch aktualisiert. Der Status umfasst:
+
+- **Pro Plattform**: Account-Anzahl, aktueller Status (Online/Rate-Limited/Gestört), letzte & nächste Refresh-Zeit
+- **Refresh-Statistiken**: Erfolgreiche, fehlerhafte und übersprungene Abfragen pro Zyklus
+- **Fehler-Details**: Auflistung fehlerhafter Accounts mit Fehlertyp
+- **Instagram-spezifisch**: Backend (curl_cffi/aiohttp), IP-Cooldown-Status & Restdauer
+- **Twitch-spezifisch**: EventSub-Status
+- **Gesamt-Farbindikator**: 🟢 Alles OK / 🟡 Teilweise gestört / 🔴 Kritische Fehler
+
+Konfiguration:
+- `/settings status_channel <channel>` – Status-Kanal setzen
+- `/settings status_refresh_interval <seconds>` – Aktualisierungs-Intervall (Standard: 30s, min. 10s, max. 3600s)
+
 ## Tests
 
 ```bash
@@ -165,6 +183,7 @@ pytest tests/ -v
 │   ├── database.py          # SQLite Datenbank-Layer (async, mit Migrationen)
 │   ├── roles.py             # Rollen-Management
 │   ├── scoreboard.py        # Scoreboard-Embeds & Count-Channel-Rename
+│   ├── status.py            # Status-Monitoring (Health-Tracking & Status-Embed)
 │   ├── pagination.py        # PaginationView (Discord-Buttons)
 │   ├── ratelimit.py         # Token-Bucket Rate-Limiter
 │   ├── cogs/
@@ -173,7 +192,8 @@ pytest tests/ -v
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   ├── stats.py         # Statistik-Commands (Growth/Overview)
 │   │   ├── refresh.py       # Background-Refresh-Loop + EventSub Bootstrap
-│   │   └── request.py       # User-Anfragen (Link/Unlink mit Admin-Approval + Scoreboard-Button)
+│   │   ├── request.py       # User-Anfragen (Link/Unlink mit Admin-Approval + Scoreboard-Button)
+│   │   └── status.py        # Status-Channel Background-Loop
 │   └── services/
 │       ├── youtube.py        # YouTube Data API v3 (rate-limited)
 │       ├── twitch.py         # Twitch Helix API + OAuth (rate-limited)

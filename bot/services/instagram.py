@@ -201,6 +201,20 @@ class InstagramService:
         self._fail_cooldowns.clear()
         self._global_cooldown = 0.0
 
+    def get_health(self) -> dict:
+        """Return service health information."""
+        now = time.monotonic()
+        global_cd_remaining = max(0.0, self._global_cooldown - now)
+        per_user_cd = sum(1 for t in self._fail_cooldowns.values() if t > now)
+        return {
+            "configured": True,
+            "session_active": self._session is not None,
+            "backend": "curl_cffi" if _HAS_CURL_CFFI else "aiohttp",
+            "global_cooldown_active": now < self._global_cooldown,
+            "global_cooldown_remaining": int(global_cd_remaining),
+            "per_user_cooldown_count": per_user_cd,
+        }
+
     # -- internal request wrappers ------------------------------------------
 
     async def _request_curl(

@@ -5,6 +5,7 @@ Refresh cog – periodic background tasks for updating counts, roles, and scoreb
 from __future__ import annotations
 
 import logging
+import time
 
 import discord
 from discord.ext import commands, tasks
@@ -19,6 +20,7 @@ from bot.roles import (
     PLATFORM_SETTINGS_PREFIX,
 )
 from bot.scoreboard import update_count_channel, update_scoreboard
+from bot.status import PlatformHealth
 
 log = logging.getLogger(__name__)
 
@@ -67,17 +69,25 @@ class RefreshCog(commands.Cog):
             if not accounts:
                 continue
 
+            # Health tracking for status embed
+            health = PlatformHealth(
+                last_refresh_start=time.time(),
+                accounts_total=len(accounts),
+            )
+
             any_updated = False
             for acc in accounts:
                 try:
                     count = await fetch_count(self.bot, platform, acc)
                 except PlatformRateLimitError:
+                    health.rate_limited = True
                     log.debug(
                         "Rate-limited fetching %s account %s (%s) in guild %s – skipping platform",
                         platform, acc["platform_name"], acc["platform_id"], guild.id,
                     )
                     break  # IP-level block – skip ALL remaining accounts for this platform
                 if count is None:
+                    health.accounts_error += 1
                     log.warning(
                         "API error for %s account %s (%s) in guild %s",
                         platform, acc["platform_name"], acc["platform_id"], guild.id,
@@ -88,6 +98,7 @@ class RefreshCog(commands.Cog):
                     )
                     continue
 
+                health.accounts_ok += 1
                 await self.bot.db.update_account_count(
                     guild.id, acc["discord_user_id"], platform,
                     acc["platform_id"], count
@@ -104,6 +115,15 @@ class RefreshCog(commands.Cog):
                         guild, member, platform,
                         acc["platform_name"], role_name, role_color
                     )
+
+            # Finalize health tracking
+            health.accounts_skipped = (
+                health.accounts_total - health.accounts_ok - health.accounts_error
+            )
+            health.last_refresh_end = time.time()
+            if guild.id not in self.bot.platform_health:
+                self.bot.platform_health[guild.id] = {}
+            self.bot.platform_health[guild.id][platform] = health
 
             if any_updated:
                 await cleanup_unused_roles(guild, platform)

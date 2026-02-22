@@ -27,15 +27,17 @@ bot/
 ├── database.py            # Database-Klasse – async SQLite Wrapper (mit Migrationen)
 ├── roles.py               # Rollen-Erstellung, -Zuweisung, -Cleanup
 ├── scoreboard.py          # Scoreboard-Embed-Erstellung, Message-Update & Count-Channel-Rename
+├── status.py              # Status-Monitoring: PlatformHealth-Tracking & Status-Embed-Builder
 ├── pagination.py          # PaginationView – Discord-Buttons für Seiten-Navigation
 ├── ratelimit.py           # Token-Bucket Rate-Limiter für API-Requests
 ├── cogs/
 │   ├── __init__.py        # Shared platform constants & helpers (PLATFORM_CHOICES, resolve_platform, fetch_count etc.)
 │   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
-│   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel)
+│   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel & Status)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
-│   ├── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap)
+│   ├── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap + Health-Tracking)
 │   ├── request.py         # User-Anfragen (Link/Unlink mit Admin-Approval-Buttons + Scoreboard-Button)
+│   └── status.py          # StatusCog – Background-Loop für Status-Channel-Updates
 └── services/
     ├── youtube.py          # YouTubeService – YouTube Data API v3 (rate-limited)
     ├── twitch.py           # TwitchService – Twitch Helix API + OAuth (rate-limited)
@@ -68,6 +70,7 @@ docs/
 - `guild_settings` wird per `get_guild_settings()` lazy angelegt (INSERT bei erstem Zugriff)
 - **Multi-Account**: UNIQUE auf `(guild_id, discord_user_id, platform, platform_id)` – ein User kann mehrere Accounts pro Plattform haben
 - **History-Deduplizierung**: Bei gleichbleibendem Count werden nur Start- und End-Zeitstempel gespeichert
+- **Status-Channel**: `status_channel_id`, `status_message_id`, `status_refresh_interval` in `guild_settings`
 
 ### Datenbank-Migrationen
 - **Der gegenwärtige Zustand der Datenbank ist immer unbekannt** – die `_migrate()`-Methode muss mit jeder möglichen Schema-Version umgehen
@@ -123,6 +126,19 @@ docs/
 - `{count}` wird durch `format_count(total)` ersetzt (Punkt-Tausendertrennung)
 - `update_count_channel()` in `bot/scoreboard.py` – wird nach jedem Refresh und force_refresh aufgerufen
 
+### Status-Channel (Admin-Monitoring)
+- Optionaler Text-Channel für einen detaillierten Bot-Status-Embed
+- `PlatformHealth`-Dataclass in `bot/status.py` trackt Refresh-Ergebnisse pro Guild+Platform
+- `build_status_embed()` in `bot/status.py` baut das Status-Embed aus Health-Daten + Service-Health + DB-Queries
+- `StatusCog` in `bot/cogs/status.py` – Background-Loop (alle 10s prüfen, per-Guild-Intervall beachten)
+- `RefreshCog` speichert nach jedem Plattform-Refresh ein `PlatformHealth`-Objekt in `bot.platform_health`
+- Alle Services haben `get_health()` – gibt Service-spezifische Gesundheitsdaten zurück
+- Instagram-Health: Backend, Global-Cooldown-Status/-Restdauer, Per-User-Cooldown-Count
+- Status-Embed zeigt: Account-Anzahl, Refresh-Timings, Abfrage-Statistiken, fehlerhafte Accounts, Gesamt-Counts
+- Gesamt-Farbe: 🟢 grün (alles OK), 🟡 gelb (teilweise gestört), 🔴 rot (kritisch)
+- Settings: `status_channel_id`, `status_message_id`, `status_refresh_interval` (Standard: 30s)
+- `force_update()` auf `StatusCog` für sofortige Aktualisierung aus Settings-Commands
+
 ### API-Services
 - `YouTubeService`, `TwitchService`, `InstagramService`, `TikTokService` in `bot/services/`
 - Alle nutzen `aiohttp.ClientSession` (lazy erstellt)
@@ -137,6 +153,7 @@ docs/
 - Beide verwenden Username als stabile ID (nicht numerisch)
 - **Instagram** bevorzugt `curl_cffi` (Browser-TLS-Impersonation via `chrome131`), fällt auf `aiohttp` zurück wenn curl_cffi nicht installiert ist
 - `_HAS_CURL_CFFI`-Flag in `bot/services/instagram.py` steuert welches Backend genutzt wird
+- **Health-API**: Alle Services haben `get_health()` – gibt dict mit Gesundheitsdaten zurück (configured, session_active, service-spezifisch)
 
 ### Konfiguration
 - `config.toml`: NUR Bot-Token und API-Keys für YouTube/Twitch (nicht per Command änderbar)
@@ -146,7 +163,7 @@ docs/
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
 - Setting-Prefixe: `yt_` (YouTube), `tw_` (Twitch), `ig_` (Instagram), `tt_` (TikTok)
 - Count-Channel-Keys: `{prefix}_count_channel_id`, `{prefix}_count_channel_pattern`
-- Globale Keys: `request_channel_id` (Anfragen-Kanal für User-Requests)
+- Globale Keys: `request_channel_id` (Anfragen-Kanal für User-Requests), `status_channel_id`, `status_message_id`, `status_refresh_interval`
 
 ## Git-Workflow
 
@@ -194,7 +211,7 @@ await cleanup_unused_roles(guild, platform)
 
 | Tabelle | Zweck |
 |---|---|
-| `guild_settings` | Pro-Guild-Konfiguration (Channels, Intervalle, Default-Patterns, Count-Channels) |
+| `guild_settings` | Pro-Guild-Konfiguration (Channels, Intervalle, Default-Patterns, Count-Channels, Status-Channel) |
 | `linked_accounts` | Discord-User ↔ Platform Mapping (multi-account, UNIQUE auf guild+user+platform+platform_id) |
 | `sub_history` | Zeitgestempelte Abo-/Follower-Snapshots (dedupliziert) |
 | `role_designs` | Benutzerdefinierte Rollen pro Bereich/exakter Zahl |

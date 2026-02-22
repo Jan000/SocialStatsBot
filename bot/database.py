@@ -53,7 +53,10 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     tw_count_channel_pattern   TEXT    DEFAULT '🎮 {count} Twitch Follower',
     ig_count_channel_pattern   TEXT    DEFAULT '📷 {count} Instagram Follower',
     tt_count_channel_pattern   TEXT    DEFAULT '🎵 {count} TikTok Follower',
-    request_channel_id         INTEGER DEFAULT 0
+    request_channel_id         INTEGER DEFAULT 0,
+    status_channel_id          INTEGER DEFAULT 0,
+    status_message_id          INTEGER DEFAULT 0,
+    status_refresh_interval    INTEGER DEFAULT 30
 );
 
 CREATE TABLE IF NOT EXISTS account_requests (
@@ -224,6 +227,21 @@ class Database:
                 )
                 await self.db.commit()
 
+            # Migration: add status channel columns to guild_settings
+            async with self.db.execute("PRAGMA table_info(guild_settings)") as cur:
+                gs_cols3 = {row[1] for row in await cur.fetchall()}
+            for col, default in [
+                ("status_channel_id", "INTEGER DEFAULT 0"),
+                ("status_message_id", "INTEGER DEFAULT 0"),
+                ("status_refresh_interval", "INTEGER DEFAULT 30"),
+            ]:
+                if col not in gs_cols3:
+                    log.info("Adding %s column to guild_settings...", col)
+                    await self.db.execute(
+                        f"ALTER TABLE guild_settings ADD COLUMN {col} {default}"
+                    )
+            await self.db.commit()
+
             # Migration: update default role patterns from old format
             await self.db.execute("""
                 UPDATE guild_settings
@@ -349,6 +367,9 @@ class Database:
             "ig_count_channel_pattern",
             "tt_count_channel_pattern",
             "request_channel_id",
+            "status_channel_id",
+            "status_message_id",
+            "status_refresh_interval",
         }
         if key not in allowed:
             raise ValueError(f"Unknown setting: {key}")

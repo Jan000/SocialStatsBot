@@ -80,6 +80,8 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
 
         # Global settings
         lines.append(f"📋 **Anfragen-Kanal:** {ch(s.get('request_channel_id', 0))}")
+        lines.append(f"📊 **Status-Kanal:** {ch(s.get('status_channel_id', 0))}")
+        lines.append(f"📊 **Status-Intervall:** {s.get('status_refresh_interval', 30)}s")
 
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
@@ -408,6 +410,55 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[int]]:
         return await self._design_id_autocomplete(interaction, current)
+
+    # ── /settings status_channel ─────────────────────────────────────
+
+    @app_commands.command(
+        name="status_channel",
+        description="Setzt den Admin-Status-Kanal für Bot-Monitoring.",
+    )
+    @app_commands.describe(channel="Text-Kanal für den Bot-Status")
+    async def status_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        await self.bot.db.update_guild_setting(
+            interaction.guild_id, "status_channel_id", channel.id
+        )
+        # Reset message ID so a new message is created in the new channel
+        await self.bot.db.update_guild_setting(
+            interaction.guild_id, "status_message_id", 0
+        )
+        await interaction.response.send_message(
+            f"✅ Status-Kanal auf {channel.mention} gesetzt.\n"
+            "Der Bot postet dort einen detaillierten Status aller Plattformen.",
+            ephemeral=True,
+        )
+        # Trigger immediate status update
+        status_cog = self.bot.get_cog("StatusCog")
+        if status_cog and interaction.guild:
+            await status_cog.force_update(interaction.guild)
+
+    # ── /settings status_refresh_interval ──────────────────────────────
+
+    @app_commands.command(
+        name="status_refresh_interval",
+        description="Setzt das Aktualisierungs-Intervall für den Status-Kanal (in Sekunden).",
+    )
+    @app_commands.describe(seconds="Intervall in Sekunden (min. 10, max. 3600)")
+    async def status_refresh_interval(
+        self,
+        interaction: discord.Interaction,
+        seconds: app_commands.Range[int, 10, 3600],
+    ) -> None:
+        await self.bot.db.update_guild_setting(
+            interaction.guild_id, "status_refresh_interval", seconds
+        )
+        await interaction.response.send_message(
+            f"✅ Status-Aktualisierungs-Intervall auf **{seconds}s** gesetzt.",
+            ephemeral=True,
+        )
 
     # ── Error handler ────────────────────────────────────────────────
 

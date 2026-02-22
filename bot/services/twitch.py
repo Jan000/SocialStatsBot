@@ -67,6 +67,14 @@ class TwitchService:
         if self._session and not self._session.closed:
             await self._session.close()
 
+    def get_health(self) -> dict:
+        """Return service health information."""
+        return {
+            "configured": bool(self.client_id and self.client_secret),
+            "session_active": self._session is not None and not self._session.closed,
+            "oauth_token": bool(self._access_token),
+        }
+
     async def _ensure_token(self) -> bool:
         """Obtain or refresh the app access token."""
         if self._access_token:

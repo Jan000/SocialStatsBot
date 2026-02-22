@@ -81,6 +81,13 @@ class YouTubeService:
         if self._session and not self._session.closed:
             await self._session.close()
 
+    def get_health(self) -> dict:
+        """Return service health information."""
+        return {
+            "configured": bool(self.api_key),
+            "session_active": self._session is not None and not self._session.closed,
+        }
+
     async def get_subscriber_count(self, channel_id: str) -> Optional[int]:
         """
         Return the subscriber count for a YouTube channel ID.

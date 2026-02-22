@@ -59,6 +59,8 @@ class SocialStatsBot(commands.Bot):
         self._enable_eventsub = enable_eventsub
         self.eventsub = None
         self.exit_code = 0
+        # Per-guild per-platform health data (populated by RefreshCog)
+        self.platform_health: dict = {}
 
     async def setup_hook(self) -> None:
         log.info("Connecting to database …")
@@ -70,6 +72,7 @@ class SocialStatsBot(commands.Bot):
         await self.load_extension("bot.cogs.stats")
         await self.load_extension("bot.cogs.refresh")
         await self.load_extension("bot.cogs.request")
+        await self.load_extension("bot.cogs.status")
 
         if self.dev_guild_id:
             guild = discord.Object(id=self.dev_guild_id)

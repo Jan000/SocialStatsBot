@@ -79,6 +79,13 @@ class TikTokService:
         if self._session and not self._session.closed:
             await self._session.close()
 
+    def get_health(self) -> dict:
+        """Return service health information."""
+        return {
+            "configured": True,
+            "session_active": self._session is not None and not self._session.closed,
+        }
+
     async def get_user_info(self, username: str) -> Optional[dict]:
         """Fetch basic profile info for a public TikTok user.
 

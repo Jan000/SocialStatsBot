@@ -49,11 +49,13 @@ _CURL_IMPERSONATE = "chrome131"
 _DEFAULT_IG_MAX_CALLS = 2
 _DEFAULT_IG_PERIOD = 5.0
 
-# Number of retries on transient errors.
-_MAX_RETRIES = 2
+# Number of retries on transient errors (non-429).
+_MAX_RETRIES = 1
 
-# Cooldown (seconds) before retrying a username that failed with 429/401.
-_FAILURE_COOLDOWN = 300  # 5 minutes
+# Cooldown (seconds) after a 429 – applies globally (IP-level block).
+_GLOBAL_429_COOLDOWN = 600  # 10 minutes
+# Cooldown (seconds) after a non-429 failure for a specific username.
+_PER_USER_COOLDOWN = 300  # 5 minutes
 
 # Patterns for parsing Instagram input
 _IG_URL_RE = re.compile(
@@ -108,6 +110,8 @@ class InstagramService:
         self._csrf_token: str = ""  # csrftoken cookie value
         # Per-username cooldown: {username: monotonic timestamp when cooldown expires}
         self._fail_cooldowns: dict[str, float] = {}
+        # Global cooldown (IP-level 429 block): monotonic timestamp when it expires
+        self._global_cooldown: float = 0.0
 
     # -- session helpers ----------------------------------------------------
 
@@ -156,20 +160,34 @@ class InstagramService:
         self._warmed_up = True
 
     def _is_on_cooldown(self, username: str) -> bool:
-        """Return True if *username* is still on failure cooldown."""
+        """Return True if requests should be skipped (global or per-user)."""
+        now = time.monotonic()
+        # Global 429 cooldown takes precedence
+        if now < self._global_cooldown:
+            return True
+        # Per-username cooldown
         expires = self._fail_cooldowns.get(username)
         if expires is None:
             return False
-        if time.monotonic() < expires:
+        if now < expires:
             return True
         # Cooldown expired – remove entry
         del self._fail_cooldowns[username]
         return False
 
+    def _set_global_cooldown(self) -> None:
+        """Activate global cooldown – Instagram is blocking our IP."""
+        self._global_cooldown = time.monotonic() + _GLOBAL_429_COOLDOWN
+        remaining = int(self._global_cooldown - time.monotonic())
+        log.warning(
+            "Instagram: IP rate-limited (429). All requests paused for %ds.",
+            remaining,
+        )
+
     def _set_cooldown(self, username: str) -> None:
         """Put *username* on cooldown so it isn't retried immediately."""
-        self._fail_cooldowns[username] = time.monotonic() + _FAILURE_COOLDOWN
-        log.info("Instagram: %s on cooldown for %ds", username, _FAILURE_COOLDOWN)
+        self._fail_cooldowns[username] = time.monotonic() + _PER_USER_COOLDOWN
+        log.info("Instagram: %s on cooldown for %ds", username, _PER_USER_COOLDOWN)
 
     async def close(self) -> None:
         if self._session is not None:
@@ -181,6 +199,7 @@ class InstagramService:
         self._warmed_up = False
         self._csrf_token = ""
         self._fail_cooldowns.clear()
+        self._global_cooldown = 0.0
 
     # -- internal request wrappers ------------------------------------------
 
@@ -210,10 +229,11 @@ class InstagramService:
 
     # -- HTML scrape (primary method) ---------------------------------------
 
-    async def _scrape_profile_html(self, session: Any, username: str) -> Optional[dict]:
+    async def _scrape_profile_html(self, session: Any, username: str) -> tuple[Optional[dict], bool]:
         """Fetch the profile page HTML and extract follower count from the
         ``<meta name="description">`` tag.
 
+        Returns ``(result_dict | None, was_429)``.
         Instagram embeds a description like
         ``"103 Followers, 20 Following, 39 Posts - Display Name (@user) …"``
         in every public profile page.  This works without cookies or auth.
@@ -227,9 +247,13 @@ class InstagramService:
                 async with session.get(url) as resp:
                     status, html = resp.status, await resp.text()
 
+            if status == 429:
+                log.warning("Instagram HTML scrape returned 429 for %s", username)
+                return None, True
+
             if status != 200:
                 log.warning("Instagram HTML scrape returned %s for %s", status, username)
-                return None
+                return None, False
 
             # Parse meta description
             meta_match = re.search(
@@ -237,14 +261,14 @@ class InstagramService:
             )
             if not meta_match:
                 log.warning("Instagram HTML: no meta description with follower count for %s", username)
-                return None
+                return None, False
 
             desc = meta_match.group(1)
             # "103 Followers, 20 Following, 39 Posts - Display Name (@user) …"
             follower_match = re.search(r"([\d,.\s]+)\s*Follower", desc)
             if not follower_match:
                 log.warning("Instagram HTML: could not parse follower count from meta for %s", username)
-                return None
+                return None, False
 
             raw = follower_match.group(1).replace(",", "").replace(".", "").replace(" ", "").strip()
             follower_count = int(raw) if raw.isdigit() else 0
@@ -262,10 +286,10 @@ class InstagramService:
                 "username": username,
                 "full_name": display_name,
                 "follower_count": follower_count,
-            }
+            }, False
         except Exception:
             log.exception("Instagram HTML scrape error for %s", username)
-            return None
+            return None, False
 
     # -- JSON API (fallback) ------------------------------------------------
 
@@ -337,28 +361,36 @@ class InstagramService:
 
         session = await self._get_session()
 
-        # --- Attempt 1: HTML scrape (with one retry on transient error) ---
+        # --- Attempt 1: HTML scrape (with retry only on non-429 errors) ---
+        got_429 = False
         for attempt in range(_MAX_RETRIES + 1):
             async with self._rate_limiter:
-                result = await self._scrape_profile_html(session, username)
+                result, was_429 = await self._scrape_profile_html(session, username)
             if result is not None:
                 return result
-            # If we got here, _scrape_profile_html logged the status.
-            # On 429, don't retry — go to cooldown.
+            if was_429:
+                # IP-level block – don't retry, activate global cooldown
+                got_429 = True
+                break
+            # Non-429 failure (e.g. parse error) – retry once
             if attempt < _MAX_RETRIES:
                 wait = 2 ** (attempt + 1)
                 log.info("Instagram: HTML retry %d/%d for %s in %ds", attempt + 1, _MAX_RETRIES, username, wait)
                 await asyncio.sleep(wait)
 
-        # --- Attempt 2: JSON API (single try) ---
-        log.info("Instagram: HTML scrape failed for %s, trying JSON API", username)
-        async with self._rate_limiter:
-            result = await self._fetch_api(session, username)
-        if result is not None:
-            return result
+        # --- Attempt 2: JSON API (only if HTML did NOT get 429) ---
+        if not got_429:
+            log.info("Instagram: HTML scrape failed for %s, trying JSON API", username)
+            async with self._rate_limiter:
+                result = await self._fetch_api(session, username)
+            if result is not None:
+                return result
 
-        # Both methods failed — set cooldown and raise.
-        self._set_cooldown(username)
+        # Both methods failed — set appropriate cooldown and raise.
+        if got_429:
+            self._set_global_cooldown()
+        else:
+            self._set_cooldown(username)
         raise PlatformRateLimitError("instagram", username)
 
     async def get_follower_count(self, username: str) -> Optional[int]:

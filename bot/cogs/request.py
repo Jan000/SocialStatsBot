@@ -38,6 +38,14 @@ from bot.scoreboard import update_count_channel, update_scoreboard
 
 log = logging.getLogger(__name__)
 
+# Platform-specific placeholder hints shown in the scoreboard link modal.
+_PLATFORM_PLACEHOLDER: dict[str, str] = {
+    "youtube": "@MeinKanal oder https://www.youtube.com/@MeinKanal",
+    "twitch": "meinkanal oder https://www.twitch.tv/meinkanal",
+    "instagram": "meinkanal oder https://www.instagram.com/meinkanal",
+    "tiktok": "@meinkanal oder https://www.tiktok.com/@meinkanal",
+}
+
 
 # ── Persistent view for Accept / Reject buttons ─────────────────────
 
@@ -200,18 +208,19 @@ class RequestDecisionView(discord.ui.View):
 class ScoreboardLinkModal(discord.ui.Modal):
     """Modal dialog that lets a user submit a link request from the scoreboard."""
 
-    channel_input = discord.ui.TextInput(
-        label="Kanal (URL, @Handle oder Username)",
-        placeholder="https://www.youtube.com/@MeinKanal",
-        style=discord.TextStyle.short,
-        required=True,
-        max_length=200,
-    )
-
     def __init__(self, platform: str) -> None:
         self.platform = platform
         plat_display = PLATFORM_DISPLAY_NAME.get(platform, platform)
         super().__init__(title=f"{plat_display}-Account verknüpfen")
+        placeholder = _PLATFORM_PLACEHOLDER.get(platform, "URL, @Handle oder Username")
+        self.channel_input = discord.ui.TextInput(
+            label=f"{plat_display}-Account (URL oder Username)",
+            placeholder=placeholder,
+            style=discord.TextStyle.short,
+            required=True,
+            max_length=200,
+        )
+        self.add_item(self.channel_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         """Validate input, create DB request, post to admin channel."""
@@ -398,8 +407,10 @@ class RequestCog(commands.GroupCog, group_name="request"):
             detected = detect_platform_from_url(channel_input)
             if detected is None:
                 await interaction.followup.send(
-                    "❌ Plattform konnte nicht erkannt werden. "
-                    "Gib eine URL an oder wähle die Plattform manuell aus.",
+                    "❌ Plattform konnte nicht erkannt werden.\n"
+                    "Wähle die Plattform über den optionalen `plattform`-Parameter aus "
+                    "(z.\u202fB. `plattform: Instagram`) oder gib eine vollständige URL an "
+                    "(z.\u202fB. `https://www.instagram.com/meinkanal`).",
                     ephemeral=True,
                 )
                 return

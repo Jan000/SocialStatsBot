@@ -102,8 +102,10 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             detected = detect_platform_from_url(channel_input)
             if detected is None:
                 await interaction.followup.send(
-                    "❌ Plattform konnte nicht erkannt werden. "
-                    "Gib eine URL an oder wähle die Plattform manuell aus.",
+                    "❌ Plattform konnte nicht erkannt werden.\n"
+                    "Wähle die Plattform über den optionalen `plattform`-Parameter aus "
+                    "(z.\u202fB. `plattform: Instagram`) oder gib eine vollständige URL an "
+                    "(z.\u202fB. `https://www.instagram.com/meinkanal`).",
                     ephemeral=True,
                 )
                 return

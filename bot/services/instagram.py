@@ -2,6 +2,8 @@
 Instagram service – fetch follower counts via public web API.
 
 Uses the public web profile endpoint (no API key required).
+Prefers *curl_cffi* for browser-grade TLS fingerprinting (avoids 429s),
+falls back to plain *aiohttp* when curl_cffi is not installed.
 """
 
 from __future__ import annotations
@@ -9,13 +11,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Optional
-
-import aiohttp
+from typing import Any, Optional
 
 from bot.ratelimit import RateLimiter
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Optional curl_cffi import – falls back to aiohttp
+# ---------------------------------------------------------------------------
+try:
+    from curl_cffi.requests import AsyncSession as _CurlAsyncSession  # type: ignore[import-untyped]
+
+    _HAS_CURL_CFFI = True
+    log.info("curl_cffi available – using browser-impersonation for Instagram")
+except ImportError:
+    _HAS_CURL_CFFI = False
+    import aiohttp
+
+    log.info("curl_cffi not installed – falling back to aiohttp for Instagram")
 
 # Public endpoint that returns profile data as JSON.
 _IG_WEB_PROFILE = "https://www.instagram.com/api/v1/users/web_profile_info/"
@@ -24,6 +38,9 @@ _IG_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+# Browser version that curl_cffi will impersonate at the TLS level.
+_CURL_IMPERSONATE = "chrome131"
 
 # Conservative rate limit – Instagram is strict about scraping.
 _DEFAULT_IG_MAX_CALLS = 2
@@ -59,7 +76,13 @@ def parse_instagram_input(value: str) -> str:
 
 
 class InstagramService:
-    """Fetches Instagram follower counts via the public web API."""
+    """Fetches Instagram follower counts via the public web API.
+
+    When *curl_cffi* is installed the service impersonates a real Chrome
+    browser at the TLS-fingerprint level, which dramatically reduces the
+    chance of Instagram returning 429 responses.  If curl_cffi is not
+    available it falls back to plain *aiohttp*.
+    """
 
     def __init__(
         self,
@@ -67,10 +90,17 @@ class InstagramService:
         max_calls: int = _DEFAULT_IG_MAX_CALLS,
         period: float = _DEFAULT_IG_PERIOD,
     ) -> None:
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: Any = None  # curl_cffi AsyncSession | aiohttp.ClientSession
         self._rate_limiter = RateLimiter(max_calls, period)
 
-    async def _get_session(self) -> aiohttp.ClientSession:
+    # -- session helpers ----------------------------------------------------
+
+    async def _get_session(self) -> Any:
+        if _HAS_CURL_CFFI:
+            if self._session is None:
+                self._session = _CurlAsyncSession(impersonate=_CURL_IMPERSONATE)
+            return self._session
+        # aiohttp fallback
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={"User-Agent": _IG_USER_AGENT}
@@ -78,8 +108,40 @@ class InstagramService:
         return self._session
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
+        if self._session is not None:
+            if _HAS_CURL_CFFI:
+                await self._session.close()
+                self._session = None
+            elif not self._session.closed:
+                await self._session.close()
+
+    # -- internal request wrappers ------------------------------------------
+
+    async def _request_curl(
+        self, session: Any, url: str, *, params: dict, headers: dict
+    ) -> tuple[int, Optional[dict]]:
+        """Perform a GET using curl_cffi and return (status, json|None)."""
+        resp = await session.get(url, params=params, headers=headers)
+        status: int = resp.status_code
+        try:
+            data: Optional[dict] = resp.json()
+        except Exception:
+            data = None
+        return status, data
+
+    async def _request_aiohttp(
+        self, session: Any, url: str, *, params: dict, headers: dict
+    ) -> tuple[int, Optional[dict]]:
+        """Perform a GET using aiohttp and return (status, json|None)."""
+        async with session.get(url, params=params, headers=headers) as resp:
+            status: int = resp.status
+            try:
+                data: Optional[dict] = await resp.json()
+            except Exception:
+                data = None
+            return status, data
+
+    # -- public API ---------------------------------------------------------
 
     async def get_user_info(self, username: str) -> Optional[dict]:
         """Fetch basic profile info for a public Instagram user.
@@ -98,43 +160,47 @@ class InstagramService:
             "X-IG-App-ID": "936619743392459",  # public web app ID
             "Referer": f"https://www.instagram.com/{username}/",
         }
+
+        do_request = self._request_curl if _HAS_CURL_CFFI else self._request_aiohttp
+
         for attempt in range(_MAX_429_RETRIES + 1):
             try:
                 async with self._rate_limiter:
-                    async with session.get(
-                        _IG_WEB_PROFILE, params=params, headers=headers
-                    ) as resp:
-                        if resp.status == 429:
-                            if attempt < _MAX_429_RETRIES:
-                                wait = min(2 ** (attempt + 1), 30)
-                                log.warning(
-                                    "Instagram 429 for %s – retry %d/%d in %ds",
-                                    username, attempt + 1, _MAX_429_RETRIES, wait,
-                                )
-                                await asyncio.sleep(wait)
-                                continue
+                    status, data = await do_request(
+                        session, _IG_WEB_PROFILE, params=params, headers=headers
+                    )
+                    if status == 429:
+                        if attempt < _MAX_429_RETRIES:
+                            wait = min(2 ** (attempt + 1), 30)
                             log.warning(
-                                "Instagram 429 for %s – retries exhausted", username
+                                "Instagram 429 for %s – retry %d/%d in %ds",
+                                username, attempt + 1, _MAX_429_RETRIES, wait,
                             )
-                            raise PlatformRateLimitError("instagram", username)
-                        if resp.status != 200:
-                            log.warning(
-                                "Instagram API returned %s for user %s",
-                                resp.status, username,
-                            )
-                            return None
-                        data = await resp.json()
-                        user = data.get("data", {}).get("user")
-                        if not user:
-                            return None
-                        return {
-                            "id": user.get("id", ""),
-                            "username": user.get("username", username),
-                            "full_name": user.get("full_name", ""),
-                            "follower_count": user.get("edge_followed_by", {}).get(
-                                "count", 0
-                            ),
-                        }
+                            await asyncio.sleep(wait)
+                            continue
+                        log.warning(
+                            "Instagram 429 for %s – retries exhausted", username
+                        )
+                        raise PlatformRateLimitError("instagram", username)
+                    if status != 200:
+                        log.warning(
+                            "Instagram API returned %s for user %s",
+                            status, username,
+                        )
+                        return None
+                    if data is None:
+                        return None
+                    user = data.get("data", {}).get("user")
+                    if not user:
+                        return None
+                    return {
+                        "id": user.get("id", ""),
+                        "username": user.get("username", username),
+                        "full_name": user.get("full_name", ""),
+                        "follower_count": user.get("edge_followed_by", {}).get(
+                            "count", 0
+                        ),
+                    }
             except PlatformRateLimitError:
                 raise
             except Exception:

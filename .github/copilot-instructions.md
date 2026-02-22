@@ -9,7 +9,8 @@ Discord-Bot in Python, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follow
 - **Python 3.11+**
 - **discord.py 2.x** mit Slash-Commands (`app_commands`)
 - **aiosqlite** für async SQLite-Zugriff
-- **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket, Instagram/TikTok Web Scraping)
+- **aiohttp** für HTTP-Requests (YouTube Data API v3, Twitch Helix API, Twitch EventSub WebSocket, TikTok Web Scraping)
+- **curl_cffi** für Instagram Web Scraping (Browser-TLS-Fingerprinting, Fallback auf aiohttp wenn nicht installiert)
 - **tomllib** (stdlib) für die Konfigurationsdatei
 - **pytest** + **pytest-asyncio** für Unit-Tests (66 Tests)
 
@@ -134,6 +135,8 @@ docs/
 - Instagram nutzt `get_channel_info()` → `{id, display_name, follower_count}`
 - TikTok nutzt `get_channel_info()` → `{id, display_name, follower_count}`
 - Beide verwenden Username als stabile ID (nicht numerisch)
+- **Instagram** bevorzugt `curl_cffi` (Browser-TLS-Impersonation via `chrome131`), fällt auf `aiohttp` zurück wenn curl_cffi nicht installiert ist
+- `_HAS_CURL_CFFI`-Flag in `bot/services/instagram.py` steuert welches Backend genutzt wird
 
 ### Konfiguration
 - `config.toml`: NUR Bot-Token und API-Keys für YouTube/Twitch (nicht per Command änderbar)

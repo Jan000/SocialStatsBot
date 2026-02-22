@@ -34,6 +34,7 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
    - YouTube API Key
    - Twitch Client ID & Secret
    - (Instagram & TikTok benötigen keine API-Keys)
+   - `curl_cffi` wird automatisch für Instagram genutzt (Browser-TLS-Fingerprinting)
 4. Bot starten:
    ```bash
    python main.py
@@ -176,7 +177,7 @@ pytest tests/ -v
 │   └── services/
 │       ├── youtube.py        # YouTube Data API v3 (rate-limited)
 │       ├── twitch.py         # Twitch Helix API + OAuth (rate-limited)
-│       ├── instagram.py      # Instagram Public Web API (rate-limited)
+│       ├── instagram.py      # Instagram Web Scraping via curl_cffi (rate-limited)
 │       ├── tiktok.py         # TikTok HTML Scraping (rate-limited)
 │       └── eventsub.py       # Twitch EventSub WebSocket-Client
 ├── tests/
@@ -210,6 +211,7 @@ Alle geplanten Features sind implementiert:
 | Discord-native Permissions | Flexibler als eigenes Admin-System |
 | Multi-Account UNIQUE Constraint | Ein User kann mehrere Accounts pro Plattform haben |
 | Instagram/TikTok ohne API-Key | Public Web Scraping, kein Entwickler-Account nötig |
+| curl_cffi für Instagram | Browser-TLS-Fingerprinting vermeidet 429-Blocks |
 | History-Deduplizierung | Reduziert DB-Größe bei gleichbleibendem Count |
 | Token-Bucket Rate-Limiting | Respektiert API-Quotas |
 | EventSub WebSocket (optional) | Echtzeit-Updates ohne öffentliche URL |

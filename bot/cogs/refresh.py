@@ -72,11 +72,11 @@ class RefreshCog(commands.Cog):
                 try:
                     count = await fetch_count(self.bot, platform, acc)
                 except PlatformRateLimitError:
-                    log.warning(
-                        "Rate-limited fetching %s account %s (%s) in guild %s",
+                    log.debug(
+                        "Rate-limited fetching %s account %s (%s) in guild %s – skipping platform",
                         platform, acc["platform_name"], acc["platform_id"], guild.id,
                     )
-                    continue
+                    break  # IP-level block – skip ALL remaining accounts for this platform
                 if count is None:
                     log.warning(
                         "API error for %s account %s (%s) in guild %s",

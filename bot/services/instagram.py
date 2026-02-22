@@ -93,6 +93,7 @@ class InstagramService:
         self._session: Any = None  # curl_cffi AsyncSession | aiohttp.ClientSession
         self._rate_limiter = RateLimiter(max_calls, period)
         self._warmed_up: bool = False  # True after initial page visit
+        self._csrf_token: str = ""  # csrftoken cookie value
 
     # -- session helpers ----------------------------------------------------
 
@@ -114,7 +115,8 @@ class InstagramService:
         """Visit the Instagram homepage once to acquire session cookies.
 
         Instagram gates its ``web_profile_info`` API behind a valid
-        ``csrftoken`` cookie.  Without it the endpoint returns 401.
+        ``csrftoken`` cookie **and** a matching ``X-CSRFToken`` header.
+        Without them the endpoint returns 401.
         """
         if self._warmed_up:
             return
@@ -122,10 +124,18 @@ class InstagramService:
             if _HAS_CURL_CFFI:
                 resp = await session.get("https://www.instagram.com/")
                 status = resp.status_code
+                cookies = dict(session.cookies)
             else:
                 async with session.get("https://www.instagram.com/") as resp:
                     status = resp.status
-            log.info("Instagram session warm-up: status %s", status)
+                    # aiohttp stores cookies on the session's cookie_jar
+                    cookies = {c.key: c.value for c in session.cookie_jar}
+            self._csrf_token = cookies.get("csrftoken", "")
+            log.info(
+                "Instagram session warm-up: status %s, csrftoken=%s",
+                status,
+                "present" if self._csrf_token else "MISSING",
+            )
         except Exception:
             log.warning("Instagram session warm-up failed", exc_info=True)
         # Mark as done regardless – we don't want to retry every call.
@@ -139,6 +149,7 @@ class InstagramService:
             elif not self._session.closed:
                 await self._session.close()
         self._warmed_up = False
+        self._csrf_token = ""
 
     # -- internal request wrappers ------------------------------------------
 
@@ -166,6 +177,65 @@ class InstagramService:
                 data = None
             return status, data
 
+    # -- HTML meta-tag fallback ---------------------------------------------
+
+    async def _scrape_profile_html(self, session: Any, username: str) -> Optional[dict]:
+        """Fallback: fetch the profile page HTML and extract follower count
+        from the ``<meta name="description">`` tag.
+
+        Instagram embeds a description like
+        ``"103 Followers, 20 Following, 39 Posts - Display Name (@user) …"``
+        in every public profile page.
+        """
+        url = f"https://www.instagram.com/{username}/"
+        try:
+            if _HAS_CURL_CFFI:
+                resp = await session.get(url)
+                status, html = resp.status_code, resp.text
+            else:
+                async with session.get(url) as resp:
+                    status, html = resp.status, await resp.text()
+
+            if status != 200:
+                log.warning("Instagram HTML scrape returned %s for %s", status, username)
+                return None
+
+            # Parse meta description
+            meta_match = re.search(
+                r'<meta\s+[^>]*?content="([^"]*?Follower[^"]*?)"', html, re.IGNORECASE
+            )
+            if not meta_match:
+                log.warning("Instagram HTML: no meta description with follower count for %s", username)
+                return None
+
+            desc = meta_match.group(1)
+            # "103 Followers, 20 Following, 39 Posts - Display Name (@user) …"
+            follower_match = re.search(r"([\d,.\s]+)\s*Follower", desc)
+            if not follower_match:
+                log.warning("Instagram HTML: could not parse follower count from meta for %s", username)
+                return None
+
+            raw = follower_match.group(1).replace(",", "").replace(".", "").replace(" ", "").strip()
+            follower_count = int(raw) if raw.isdigit() else 0
+
+            # Try to extract display name from "… - Display Name (@user) …"
+            name_match = re.search(r"-\s*(.+?)\s*\(@?" + re.escape(username) + r"\)", desc)
+            display_name = name_match.group(1).strip() if name_match else username
+
+            log.info(
+                "Instagram HTML fallback OK for %s: %d followers",
+                username, follower_count,
+            )
+            return {
+                "id": "",
+                "username": username,
+                "full_name": display_name,
+                "follower_count": follower_count,
+            }
+        except Exception:
+            log.exception("Instagram HTML scrape error for %s", username)
+            return None
+
     # -- public API ---------------------------------------------------------
 
     async def get_user_info(self, username: str) -> Optional[dict]:
@@ -185,6 +255,7 @@ class InstagramService:
         params = {"username": username}
         headers = {
             "X-IG-App-ID": "936619743392459",  # public web app ID
+            "X-CSRFToken": self._csrf_token,
             "Referer": f"https://www.instagram.com/{username}/",
         }
 
@@ -203,16 +274,20 @@ class InstagramService:
                                 "Instagram %s for %s – retry %d/%d in %ds",
                                 status, username, attempt + 1, _MAX_429_RETRIES, wait,
                             )
-                            # On 401 try re-warming the session (cookie may have expired)
-                            if status == 401:
-                                self._warmed_up = False
-                                await self._warm_session(session)
+                            # Re-warm the session to refresh cookies/CSRF token
+                            self._warmed_up = False
+                            await self._warm_session(session)
+                            headers["X-CSRFToken"] = self._csrf_token
                             await asyncio.sleep(wait)
                             continue
                         log.warning(
-                            "Instagram %s for %s – retries exhausted",
+                            "Instagram %s for %s – API retries exhausted, trying HTML fallback",
                             status, username,
                         )
+                        # Last resort: scrape the profile page HTML
+                        result = await self._scrape_profile_html(session, username)
+                        if result is not None:
+                            return result
                         raise PlatformRateLimitError("instagram", username)
                     if status != 200:
                         log.warning(

@@ -25,7 +25,7 @@ _DEFAULT_TW_PERIOD = 1.0
 _TW_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?twitch\.tv/([\w]+)/?", re.IGNORECASE
 )
-_TW_RAW_LOGIN_RE = re.compile(r"^[\w]{2,25}$")
+_TW_RAW_LOGIN_RE = re.compile(r"^@?([\w]{2,25})$")
 
 
 def parse_twitch_input(value: str) -> str:
@@ -35,14 +35,16 @@ def parse_twitch_input(value: str) -> str:
     Accepts:
       - https://www.twitch.tv/niruki  -> 'niruki'
       - twitch.tv/niruki               -> 'niruki'
+      - @niruki                        -> 'niruki'
       - niruki                         -> 'niruki'
     """
     value = value.strip()
     m = _TW_URL_RE.match(value)
     if m:
         return m.group(1).lower()
-    if _TW_RAW_LOGIN_RE.match(value):
-        return value.lower()
+    m = _TW_RAW_LOGIN_RE.match(value)
+    if m:
+        return m.group(1).lower()
     return value.lower()
 
 

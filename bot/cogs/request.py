@@ -40,10 +40,10 @@ log = logging.getLogger(__name__)
 
 # Platform-specific placeholder hints shown in the scoreboard link modal.
 _PLATFORM_PLACEHOLDER: dict[str, str] = {
-    "youtube": "@MeinKanal oder https://www.youtube.com/@MeinKanal",
-    "twitch": "meinkanal oder https://www.twitch.tv/meinkanal",
-    "instagram": "meinkanal oder https://www.instagram.com/meinkanal",
-    "tiktok": "@meinkanal oder https://www.tiktok.com/@meinkanal",
+    "youtube": "MeinKanal",
+    "twitch": "MeinKanal",
+    "instagram": "MeinKanal",
+    "tiktok": "MeinKanal",
 }
 
 
@@ -212,9 +212,9 @@ class ScoreboardLinkModal(discord.ui.Modal):
         self.platform = platform
         plat_display = PLATFORM_DISPLAY_NAME.get(platform, platform)
         super().__init__(title=f"{plat_display}-Account verknüpfen")
-        placeholder = _PLATFORM_PLACEHOLDER.get(platform, "URL, @Handle oder Username")
+        placeholder = _PLATFORM_PLACEHOLDER.get(platform, "MeinKanal")
         self.channel_input = discord.ui.TextInput(
-            label=f"{plat_display}-Account (URL oder Username)",
+            label=f"{plat_display}-Username oder URL",
             placeholder=placeholder,
             style=discord.TextStyle.short,
             required=True,
@@ -387,7 +387,7 @@ class RequestCog(commands.GroupCog, group_name="request"):
         description="Stellt eine Anfrage, einen Social-Media-Account zu verknüpfen.",
     )
     @app_commands.describe(
-        channel_input="Kanal (URL, @Handle, Login-Name oder ID)",
+        channel_input="Username oder URL des Accounts",
         platform="Plattform (optional bei URL-Eingabe)",
     )
     @app_commands.choices(platform=PLATFORM_CHOICES)

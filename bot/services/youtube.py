@@ -27,19 +27,20 @@ _YT_HANDLE_RE = re.compile(
 _YT_CHANNEL_ID_RE = re.compile(
     r"(?:https?://)?(?:www\.)?youtube\.com/channel/(UC[\w-]+)", re.IGNORECASE
 )
-_YT_RAW_HANDLE_RE = re.compile(r"^@([\w.-]+)$")
+_YT_RAW_HANDLE_RE = re.compile(r"^@?([\w.-]+)$")
 _YT_RAW_CHANNEL_ID_RE = re.compile(r"^UC[\w-]+$")
 
 
 def parse_youtube_input(value: str) -> tuple[str, str]:
     """
     Parse a YouTube input string and return (type, identifier).
-    type is 'handle', 'id', or 'unknown'.
+    type is 'handle' or 'id'.
     Accepts:
-      - https://www.youtube.com/@Niruki  -> ('handle', 'Niruki')
-      - @Niruki                          -> ('handle', 'Niruki')
+      - https://www.youtube.com/@Niruki       -> ('handle', 'Niruki')
       - https://www.youtube.com/channel/UCxxx -> ('id', 'UCxxx')
-      - UCxxx                            -> ('id', 'UCxxx')
+      - @Niruki                               -> ('handle', 'Niruki')
+      - Niruki                                -> ('handle', 'Niruki')
+      - UCxxx                                 -> ('id', 'UCxxx')
     """
     value = value.strip()
 
@@ -51,12 +52,14 @@ def parse_youtube_input(value: str) -> tuple[str, str]:
     if m:
         return ("id", m.group(1))
 
+    # Channel IDs before handle fallback – UC* is always a channel ID
+    if _YT_RAW_CHANNEL_ID_RE.match(value):
+        return ("id", value)
+
+    # Treat any remaining plain text as a handle (with or without @)
     m = _YT_RAW_HANDLE_RE.match(value)
     if m:
         return ("handle", m.group(1))
-
-    if _YT_RAW_CHANNEL_ID_RE.match(value):
-        return ("id", value)
 
     return ("unknown", value)
 
@@ -130,7 +133,7 @@ class YouTubeService:
     async def resolve_channel(self, user_input: str) -> Optional[dict]:
         """
         Resolve a YouTube channel from flexible user input.
-        Accepts: channel URL, @handle, or channel ID.
+        Accepts: channel URL, @handle, plain name, or channel ID.
         Returns channel info dict or None.
         """
         input_type, identifier = parse_youtube_input(user_input)
@@ -139,12 +142,11 @@ class YouTubeService:
             return await self.get_channel_info_by_handle(identifier)
         elif input_type == "id":
             return await self.get_channel_info(identifier)
-        else:
-            # Try as channel ID first, then as handle
-            info = await self.get_channel_info(identifier)
-            if info:
-                return info
-            return await self.get_channel_info_by_handle(identifier)
+        # Fallback: try both (should rarely happen with the improved parser)
+        info = await self.get_channel_info_by_handle(identifier)
+        if info:
+            return info
+        return await self.get_channel_info(identifier)
 
     async def _fetch_channel_info(self, session: aiohttp.ClientSession, params: dict) -> Optional[dict]:
         """Shared helper to fetch and parse channel info from the API."""

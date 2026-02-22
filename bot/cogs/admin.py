@@ -81,7 +81,7 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     )
     @app_commands.describe(
         user="Discord-User",
-        channel_input="Kanal (URL, @Handle, Login-Name oder ID)",
+        channel_input="Username oder URL des Accounts",
         platform="Plattform (optional bei URL-Eingabe)",
     )
     @app_commands.choices(platform=PLATFORM_CHOICES)

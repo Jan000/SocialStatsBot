@@ -17,7 +17,7 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 - **Twitch EventSub** – Optionale WebSocket-Integration für Echtzeit-Channel-Updates
 - **Docker-Support** – Deployment via `docker compose up`
 - **Historien-Tracking** – Alle Änderungen dedupliziert in SQLite gespeichert
-- **Flexible Eingabe** – YouTube-URLs, @Handles, Channel-IDs sowie Twitch-URLs, Login-Namen, Instagram-URLs/Usernames und TikTok-URLs/Usernames
+- **Flexible Eingabe** – Usernames, URLs, @Handles und Channel-IDs werden überall akzeptiert (das `@` ist optional und wird automatisch ergänzt)
 - **Auto-Plattform-Erkennung** – Bei URL-Eingabe wird die Plattform automatisch erkannt (kein manuelles Auswählen nötig)
 - **User-Anfragen-System** – Normale User können Link/Unlink-Anfragen stellen, Admins bestätigen per Button. Link-Anfragen auch direkt über den Scoreboard-Button möglich.
 - **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert

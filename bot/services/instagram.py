@@ -1,7 +1,9 @@
 """
-Instagram service – fetch follower counts via public web API.
+Instagram service – fetch follower counts via public web scraping.
 
-Uses the public web profile endpoint (no API key required).
+Primary method: scrape the profile page HTML ``<meta>`` tag (no cookies/auth needed).
+Fallback: ``web_profile_info`` JSON API (needs CSRF token, often returns 401).
+
 Prefers *curl_cffi* for browser-grade TLS fingerprinting (avoids 429s),
 falls back to plain *aiohttp* when curl_cffi is not installed.
 """
@@ -11,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Any, Optional
 
 from bot.ratelimit import RateLimiter
@@ -46,8 +49,11 @@ _CURL_IMPERSONATE = "chrome131"
 _DEFAULT_IG_MAX_CALLS = 2
 _DEFAULT_IG_PERIOD = 5.0
 
-# Number of retries on HTTP 429 (rate-limited) responses.
-_MAX_429_RETRIES = 3
+# Number of retries on transient errors.
+_MAX_RETRIES = 2
+
+# Cooldown (seconds) before retrying a username that failed with 429/401.
+_FAILURE_COOLDOWN = 300  # 5 minutes
 
 # Patterns for parsing Instagram input
 _IG_URL_RE = re.compile(
@@ -76,7 +82,13 @@ def parse_instagram_input(value: str) -> str:
 
 
 class InstagramService:
-    """Fetches Instagram follower counts via the public web API.
+    """Fetches Instagram follower counts via public web scraping.
+
+    **Primary method**: fetch the profile page HTML and parse the follower
+    count from the ``<meta name="description">`` tag.  This works without
+    any cookies, CSRF tokens, or authentication.
+
+    **Fallback**: the ``web_profile_info`` JSON endpoint (needs CSRF token).
 
     When *curl_cffi* is installed the service impersonates a real Chrome
     browser at the TLS-fingerprint level, which dramatically reduces the
@@ -94,6 +106,8 @@ class InstagramService:
         self._rate_limiter = RateLimiter(max_calls, period)
         self._warmed_up: bool = False  # True after initial page visit
         self._csrf_token: str = ""  # csrftoken cookie value
+        # Per-username cooldown: {username: monotonic timestamp when cooldown expires}
+        self._fail_cooldowns: dict[str, float] = {}
 
     # -- session helpers ----------------------------------------------------
 
@@ -141,6 +155,22 @@ class InstagramService:
         # Mark as done regardless – we don't want to retry every call.
         self._warmed_up = True
 
+    def _is_on_cooldown(self, username: str) -> bool:
+        """Return True if *username* is still on failure cooldown."""
+        expires = self._fail_cooldowns.get(username)
+        if expires is None:
+            return False
+        if time.monotonic() < expires:
+            return True
+        # Cooldown expired – remove entry
+        del self._fail_cooldowns[username]
+        return False
+
+    def _set_cooldown(self, username: str) -> None:
+        """Put *username* on cooldown so it isn't retried immediately."""
+        self._fail_cooldowns[username] = time.monotonic() + _FAILURE_COOLDOWN
+        log.info("Instagram: %s on cooldown for %ds", username, _FAILURE_COOLDOWN)
+
     async def close(self) -> None:
         if self._session is not None:
             if _HAS_CURL_CFFI:
@@ -150,6 +180,7 @@ class InstagramService:
                 await self._session.close()
         self._warmed_up = False
         self._csrf_token = ""
+        self._fail_cooldowns.clear()
 
     # -- internal request wrappers ------------------------------------------
 
@@ -177,15 +208,15 @@ class InstagramService:
                 data = None
             return status, data
 
-    # -- HTML meta-tag fallback ---------------------------------------------
+    # -- HTML scrape (primary method) ---------------------------------------
 
     async def _scrape_profile_html(self, session: Any, username: str) -> Optional[dict]:
-        """Fallback: fetch the profile page HTML and extract follower count
-        from the ``<meta name="description">`` tag.
+        """Fetch the profile page HTML and extract follower count from the
+        ``<meta name="description">`` tag.
 
         Instagram embeds a description like
         ``"103 Followers, 20 Following, 39 Posts - Display Name (@user) …"``
-        in every public profile page.
+        in every public profile page.  This works without cookies or auth.
         """
         url = f"https://www.instagram.com/{username}/"
         try:
@@ -223,7 +254,7 @@ class InstagramService:
             display_name = name_match.group(1).strip() if name_match else username
 
             log.info(
-                "Instagram HTML fallback OK for %s: %d followers",
+                "Instagram HTML OK for %s: %d followers",
                 username, follower_count,
             )
             return {
@@ -236,20 +267,14 @@ class InstagramService:
             log.exception("Instagram HTML scrape error for %s", username)
             return None
 
-    # -- public API ---------------------------------------------------------
+    # -- JSON API (fallback) ------------------------------------------------
 
-    async def get_user_info(self, username: str) -> Optional[dict]:
-        """Fetch basic profile info for a public Instagram user.
+    async def _fetch_api(self, session: Any, username: str) -> Optional[dict]:
+        """Try the ``web_profile_info`` JSON endpoint (needs CSRF token).
 
-        Returns dict with id, username, full_name, follower_count
-        or None on error.
-
-        Raises :class:`PlatformRateLimitError` when the API keeps returning
-        429 after all retry attempts.
+        Returns user info dict or None on error.  Does NOT raise on
+        rate-limit – callers decide how to handle that.
         """
-        from bot.cogs import PlatformRateLimitError
-
-        session = await self._get_session()
         await self._warm_session(session)
 
         params = {"username": username}
@@ -261,59 +286,80 @@ class InstagramService:
 
         do_request = self._request_curl if _HAS_CURL_CFFI else self._request_aiohttp
 
-        for attempt in range(_MAX_429_RETRIES + 1):
-            try:
-                async with self._rate_limiter:
-                    status, data = await do_request(
-                        session, _IG_WEB_PROFILE, params=params, headers=headers
-                    )
-                    if status in (401, 429):
-                        if attempt < _MAX_429_RETRIES:
-                            wait = min(2 ** (attempt + 1), 30)
-                            log.warning(
-                                "Instagram %s for %s – retry %d/%d in %ds",
-                                status, username, attempt + 1, _MAX_429_RETRIES, wait,
-                            )
-                            # Re-warm the session to refresh cookies/CSRF token
-                            self._warmed_up = False
-                            await self._warm_session(session)
-                            headers["X-CSRFToken"] = self._csrf_token
-                            await asyncio.sleep(wait)
-                            continue
-                        log.warning(
-                            "Instagram %s for %s – API retries exhausted, trying HTML fallback",
-                            status, username,
-                        )
-                        # Last resort: scrape the profile page HTML
-                        result = await self._scrape_profile_html(session, username)
-                        if result is not None:
-                            return result
-                        raise PlatformRateLimitError("instagram", username)
-                    if status != 200:
-                        log.warning(
-                            "Instagram API returned %s for user %s",
-                            status, username,
-                        )
-                        return None
-                    if data is None:
-                        return None
-                    user = data.get("data", {}).get("user")
-                    if not user:
-                        return None
-                    return {
-                        "id": user.get("id", ""),
-                        "username": user.get("username", username),
-                        "full_name": user.get("full_name", ""),
-                        "follower_count": user.get("edge_followed_by", {}).get(
-                            "count", 0
-                        ),
-                    }
-            except PlatformRateLimitError:
-                raise
-            except Exception:
-                log.exception("Instagram API error for user %s", username)
-                return None
-        return None  # pragma: no cover – loop always returns or raises
+        try:
+            async with self._rate_limiter:
+                status, data = await do_request(
+                    session, _IG_WEB_PROFILE, params=params, headers=headers
+                )
+        except Exception:
+            log.exception("Instagram API error for user %s", username)
+            return None
+
+        if status in (401, 429):
+            log.warning("Instagram API returned %s for %s", status, username)
+            return None
+        if status != 200 or data is None:
+            log.warning("Instagram API returned %s for user %s", status, username)
+            return None
+
+        user = data.get("data", {}).get("user")
+        if not user:
+            return None
+        return {
+            "id": user.get("id", ""),
+            "username": user.get("username", username),
+            "full_name": user.get("full_name", ""),
+            "follower_count": user.get("edge_followed_by", {}).get("count", 0),
+        }
+
+    # -- public API ---------------------------------------------------------
+
+    async def get_user_info(self, username: str) -> Optional[dict]:
+        """Fetch basic profile info for a public Instagram user.
+
+        Strategy:
+        1. **HTML scrape** (primary) – single GET, no auth, very reliable.
+        2. **JSON API** (fallback) – only if HTML scrape fails with a non-429
+           status (i.e. the profile page rendered but parsing failed).
+
+        Returns dict with id, username, full_name, follower_count
+        or None on error.
+
+        Raises :class:`PlatformRateLimitError` when both methods are
+        rate-limited / blocked.
+        """
+        from bot.cogs import PlatformRateLimitError
+
+        # If this username recently failed, skip to avoid hammering Instagram.
+        if self._is_on_cooldown(username):
+            log.debug("Instagram: %s still on cooldown, skipping", username)
+            raise PlatformRateLimitError("instagram", username)
+
+        session = await self._get_session()
+
+        # --- Attempt 1: HTML scrape (with one retry on transient error) ---
+        for attempt in range(_MAX_RETRIES + 1):
+            async with self._rate_limiter:
+                result = await self._scrape_profile_html(session, username)
+            if result is not None:
+                return result
+            # If we got here, _scrape_profile_html logged the status.
+            # On 429, don't retry — go to cooldown.
+            if attempt < _MAX_RETRIES:
+                wait = 2 ** (attempt + 1)
+                log.info("Instagram: HTML retry %d/%d for %s in %ds", attempt + 1, _MAX_RETRIES, username, wait)
+                await asyncio.sleep(wait)
+
+        # --- Attempt 2: JSON API (single try) ---
+        log.info("Instagram: HTML scrape failed for %s, trying JSON API", username)
+        async with self._rate_limiter:
+            result = await self._fetch_api(session, username)
+        if result is not None:
+            return result
+
+        # Both methods failed — set cooldown and raise.
+        self._set_cooldown(username)
+        raise PlatformRateLimitError("instagram", username)
 
     async def get_follower_count(self, username: str) -> Optional[int]:
         """Return the follower count for an Instagram username."""

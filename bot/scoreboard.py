@@ -28,12 +28,15 @@ PLATFORM_LABELS = {
     "tiktok": ("TikTok Follower", "🎵"),
 }
 
-PLATFORM_THUMBNAIL = {
-    "youtube": "https://raw.githubusercontent.com/Jan000/SocialStatsBot/main/assets/icons/youtube.png",
-    "twitch": "https://raw.githubusercontent.com/Jan000/SocialStatsBot/main/assets/icons/twitch.png",
-    "instagram": "https://raw.githubusercontent.com/Jan000/SocialStatsBot/main/assets/icons/instagram.png",
-    "tiktok": "https://raw.githubusercontent.com/Jan000/SocialStatsBot/main/assets/icons/tiktok.png",
+# Local PNG paths (bundled in Docker image, no external URL needed).
+# Embeds use  attachment://platform_icon.png  so Discord hosts the file.
+PLATFORM_ICON_PATH = {
+    "youtube": "assets/icons/youtube.png",
+    "twitch": "assets/icons/twitch.png",
+    "instagram": "assets/icons/instagram.png",
+    "tiktok": "assets/icons/tiktok.png",
 }
+_ICON_ATTACHMENT_NAME = "platform_icon.png"
 
 PLATFORM_COLOUR = {
     "youtube": discord.Colour(0xFF0000),
@@ -82,12 +85,24 @@ def _apply_embed_chrome(
     next_ts: int,
     interval: int,
 ) -> None:
-    """Set thumbnail and append timestamp block on *embed* (mutates in-place)."""
-    thumb = PLATFORM_THUMBNAIL.get(platform)
-    if thumb:
-        embed.set_thumbnail(url=thumb)
+    """Set thumbnail reference and append timestamp block on *embed* (mutates in-place).
+
+    The thumbnail uses ``attachment://platform_icon.png``.  Callers must
+    pass the actual file object when sending/editing the Discord message.
+    """
+    if platform in PLATFORM_ICON_PATH:
+        embed.set_thumbnail(url=f"attachment://{_ICON_ATTACHMENT_NAME}")
     # Append timestamp block to description (footer can't render <t:…:R>)
     embed.description = (embed.description or "") + _timestamp_block(now_ts, next_ts, interval)
+
+
+def _icon_file(platform: str) -> discord.File | None:
+    """Return a fresh :class:`discord.File` for the platform icon, or None."""
+    import os
+    path = PLATFORM_ICON_PATH.get(platform)
+    if path and os.path.exists(path):
+        return discord.File(path, filename=_ICON_ATTACHMENT_NAME)
+    return None
 
 
 async def build_scoreboard_embeds(
@@ -121,6 +136,7 @@ async def build_scoreboard_embeds(
         _apply_embed_chrome(embed, platform, now_ts, next_ts, interval)
         return [embed]
 
+
     # ── Summary line ─────────────────────────────────────────────
     c_label = PLATFORM_COUNT_LABEL.get(platform, "")
     total = sum(a["current_count"] for a in accounts)
@@ -150,9 +166,8 @@ async def build_scoreboard_embeds(
             colour=colour,
             description=full_desc,
         )
-        thumb = PLATFORM_THUMBNAIL.get(platform)
-        if thumb:
-            embed.set_thumbnail(url=thumb)
+        if platform in PLATFORM_ICON_PATH:
+            embed.set_thumbnail(url=f"attachment://{_ICON_ATTACHMENT_NAME}")
         return [embed]
 
     # ── Split into two embeds ────────────────────────────────────
@@ -169,9 +184,8 @@ async def build_scoreboard_embeds(
         colour=colour,
         description=desc1,
     )
-    thumb = PLATFORM_THUMBNAIL.get(platform)
-    if thumb:
-        embed1.set_thumbnail(url=thumb)
+    if platform in PLATFORM_ICON_PATH:
+        embed1.set_thumbnail(url=f"attachment://{_ICON_ATTACHMENT_NAME}")
     embed2 = discord.Embed(
         title=f"{emoji}  {label} Scoreboard (2/2)",
         colour=colour,
@@ -218,19 +232,25 @@ async def update_scoreboard(
     for i, embed in enumerate(embeds):
         is_last = i == last_idx
         view = link_view if is_last else empty_view
+        # Only the first embed in each scoreboard gets the icon attachment.
+        icon = _icon_file(platform) if i == 0 else None
         sent = False
 
         if i < len(old_ids):
             try:
                 msg = await channel.fetch_message(old_ids[i])
-                await msg.edit(embed=embed, view=view)
+                attachments = [icon] if icon else []
+                await msg.edit(embed=embed, view=view, attachments=attachments)
                 new_ids.append(msg.id)
                 sent = True
             except (discord.NotFound, discord.HTTPException):
                 pass
         if not sent:
             try:
-                msg = await channel.send(embed=embed, view=view)
+                if icon:
+                    msg = await channel.send(embed=embed, view=view, file=icon)
+                else:
+                    msg = await channel.send(embed=embed, view=view)
                 new_ids.append(msg.id)
             except discord.Forbidden:
                 log.error(

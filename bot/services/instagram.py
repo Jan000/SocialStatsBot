@@ -92,6 +92,7 @@ class InstagramService:
     ) -> None:
         self._session: Any = None  # curl_cffi AsyncSession | aiohttp.ClientSession
         self._rate_limiter = RateLimiter(max_calls, period)
+        self._warmed_up: bool = False  # True after initial page visit
 
     # -- session helpers ----------------------------------------------------
 
@@ -99,13 +100,36 @@ class InstagramService:
         if _HAS_CURL_CFFI:
             if self._session is None:
                 self._session = _CurlAsyncSession(impersonate=_CURL_IMPERSONATE)
+                log.info("Instagram: using curl_cffi (impersonate=%s)", _CURL_IMPERSONATE)
             return self._session
         # aiohttp fallback
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 headers={"User-Agent": _IG_USER_AGENT}
             )
+            log.info("Instagram: using aiohttp fallback (curl_cffi not available)")
         return self._session
+
+    async def _warm_session(self, session: Any) -> None:
+        """Visit the Instagram homepage once to acquire session cookies.
+
+        Instagram gates its ``web_profile_info`` API behind a valid
+        ``csrftoken`` cookie.  Without it the endpoint returns 401.
+        """
+        if self._warmed_up:
+            return
+        try:
+            if _HAS_CURL_CFFI:
+                resp = await session.get("https://www.instagram.com/")
+                status = resp.status_code
+            else:
+                async with session.get("https://www.instagram.com/") as resp:
+                    status = resp.status
+            log.info("Instagram session warm-up: status %s", status)
+        except Exception:
+            log.warning("Instagram session warm-up failed", exc_info=True)
+        # Mark as done regardless – we don't want to retry every call.
+        self._warmed_up = True
 
     async def close(self) -> None:
         if self._session is not None:
@@ -114,6 +138,7 @@ class InstagramService:
                 self._session = None
             elif not self._session.closed:
                 await self._session.close()
+        self._warmed_up = False
 
     # -- internal request wrappers ------------------------------------------
 
@@ -155,6 +180,8 @@ class InstagramService:
         from bot.cogs import PlatformRateLimitError
 
         session = await self._get_session()
+        await self._warm_session(session)
+
         params = {"username": username}
         headers = {
             "X-IG-App-ID": "936619743392459",  # public web app ID
@@ -169,17 +196,22 @@ class InstagramService:
                     status, data = await do_request(
                         session, _IG_WEB_PROFILE, params=params, headers=headers
                     )
-                    if status == 429:
+                    if status in (401, 429):
                         if attempt < _MAX_429_RETRIES:
                             wait = min(2 ** (attempt + 1), 30)
                             log.warning(
-                                "Instagram 429 for %s – retry %d/%d in %ds",
-                                username, attempt + 1, _MAX_429_RETRIES, wait,
+                                "Instagram %s for %s – retry %d/%d in %ds",
+                                status, username, attempt + 1, _MAX_429_RETRIES, wait,
                             )
+                            # On 401 try re-warming the session (cookie may have expired)
+                            if status == 401:
+                                self._warmed_up = False
+                                await self._warm_session(session)
                             await asyncio.sleep(wait)
                             continue
                         log.warning(
-                            "Instagram 429 for %s – retries exhausted", username
+                            "Instagram %s for %s – retries exhausted",
+                            status, username,
                         )
                         raise PlatformRateLimitError("instagram", username)
                     if status != 200:

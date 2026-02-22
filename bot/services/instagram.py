@@ -51,7 +51,7 @@ _MAX_429_RETRIES = 3
 
 # Patterns for parsing Instagram input
 _IG_URL_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?instagram\.com/([\w.]+)/?", re.IGNORECASE
+    r"(?:https?://)?(?:[\w-]+\.)*instagram\.com/([\w.]+)/?", re.IGNORECASE
 )
 _IG_RAW_LOGIN_RE = re.compile(r"^@?([\w.]{1,30})$")
 

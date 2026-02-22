@@ -23,7 +23,7 @@ _DEFAULT_TW_PERIOD = 1.0
 
 # Patterns for parsing Twitch input
 _TW_URL_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?twitch\.tv/([\w]+)/?", re.IGNORECASE
+    r"(?:https?://)?(?:[\w-]+\.)*twitch\.tv/([\w]+)/?", re.IGNORECASE
 )
 _TW_RAW_LOGIN_RE = re.compile(r"^@?([\w]{2,25})$")
 

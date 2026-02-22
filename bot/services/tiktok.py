@@ -32,7 +32,7 @@ _MAX_429_RETRIES = 3
 
 # Patterns for parsing TikTok input
 _TT_URL_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?tiktok\.com/@([\w.]+)/?", re.IGNORECASE
+    r"(?:https?://)?(?:[\w-]+\.)*tiktok\.com/@([\w.]+)/?", re.IGNORECASE
 )
 _TT_RAW_LOGIN_RE = re.compile(r"^@?([\w.]{1,24})$")
 

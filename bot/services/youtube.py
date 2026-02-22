@@ -22,10 +22,10 @@ _DEFAULT_YT_PERIOD = 1.0
 
 # Patterns to extract a handle or channel ID from various YouTube URL formats
 _YT_HANDLE_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?youtube\.com/@([\w.-]+)", re.IGNORECASE
+    r"(?:https?://)?(?:[\w-]+\.)*youtube\.com/@([\w.-]+)", re.IGNORECASE
 )
 _YT_CHANNEL_ID_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?youtube\.com/channel/(UC[\w-]+)", re.IGNORECASE
+    r"(?:https?://)?(?:[\w-]+\.)*youtube\.com/channel/(UC[\w-]+)", re.IGNORECASE
 )
 _YT_RAW_HANDLE_RE = re.compile(r"^@?([\w.-]+)$")
 _YT_RAW_CHANNEL_ID_RE = re.compile(r"^UC[\w-]+$")

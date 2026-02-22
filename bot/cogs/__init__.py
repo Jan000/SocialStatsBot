@@ -64,11 +64,11 @@ PLATFORM_DISPLAY_NAME = {
 
 # ── URL → platform detection ─────────────────────────────────────────
 _URL_PLATFORM_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"(?:https?://)?(?:www\.)?youtube\.com/", re.I), "youtube"),
-    (re.compile(r"(?:https?://)?(?:www\.)?youtu\.be/", re.I), "youtube"),
-    (re.compile(r"(?:https?://)?(?:www\.)?twitch\.tv/", re.I), "twitch"),
-    (re.compile(r"(?:https?://)?(?:www\.)?instagram\.com/", re.I), "instagram"),
-    (re.compile(r"(?:https?://)?(?:www\.)?tiktok\.com/", re.I), "tiktok"),
+    (re.compile(r"(?:https?://)?(?:[\w-]+\.)*youtube\.com/", re.I), "youtube"),
+    (re.compile(r"(?:https?://)?(?:[\w-]+\.)*youtu\.be/", re.I), "youtube"),
+    (re.compile(r"(?:https?://)?(?:[\w-]+\.)*twitch\.tv/", re.I), "twitch"),
+    (re.compile(r"(?:https?://)?(?:[\w-]+\.)*instagram\.com/", re.I), "instagram"),
+    (re.compile(r"(?:https?://)?(?:[\w-]+\.)*tiktok\.com/", re.I), "tiktok"),
 ]
 
 

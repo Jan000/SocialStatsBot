@@ -3,8 +3,8 @@
 # Docker entrypoint for Social-Stats-Bot
 #
 # Wraps the bot process in a loop.  When the bot exits with
-# code 42 (triggered by /admin update), git pull and pip install
-# are run before the bot is restarted.
+# code 42 (triggered by /admin update), git pull is run and
+# the updated files are checked out before the bot restarts.
 #
 # Any other exit code causes the entrypoint to exit, letting
 # Docker's restart policy handle recovery.
@@ -32,9 +32,9 @@ while true; do
     printf '=== Update gestartet: %s ===\n\n' \
         "$(date '+%d.%m.%Y %H:%M:%S')" > "$LOG_FILE"
 
-    # Step 1: git pull
+    # Step 1: git pull + checkout (update .git, then apply to working tree)
     echo "── git pull ──────────────────────────" >> "$LOG_FILE"
-    if git pull >> "$LOG_FILE" 2>&1; then
+    if git pull >> "$LOG_FILE" 2>&1 && git checkout -f >> "$LOG_FILE" 2>&1; then
         echo "✅ git pull erfolgreich" >> "$LOG_FILE"
     else
         echo "❌ git pull fehlgeschlagen" >> "$LOG_FILE"

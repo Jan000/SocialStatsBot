@@ -1,9 +1,14 @@
 services:
   bot:
     build: .
+    container_name: social-stats-bot
     restart: unless-stopped
     volumes:
-      # Mount source code so /admin update can git pull
-      - .:/app
-      # SSH keys for git pull (adjust path if using HTTPS instead)
+      # Persist the SQLite database
+      - ./data:/app/data
+      # Mount config (must exist before starting)
+      - ./config.toml:/app/config.toml:ro
+      # Mount .git so /admin update can git pull inside the container
+      - ./.git:/app/.git:rw
+      # SSH keys for git pull (remove if using HTTPS)
       - ~/.ssh:/root/.ssh:ro

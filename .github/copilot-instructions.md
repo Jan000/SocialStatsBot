@@ -22,7 +22,11 @@ config.toml                # Bot-Token + API-Keys (nicht im Git)
 pytest.ini                 # pytest-Konfiguration
 Dockerfile                 # Docker-Image (python:3.11-slim + git)
 docker-compose.yml         # Docker-Compose für einfaches Deployment
-entrypoint.sh              # Docker-Entrypoint (Update-Loop mit git pull)
+entrypoint.sh              # Docker-Entrypoint (Update-Loop mit git pull + checkout)
+start.sh                   # Bot starten (docker compose up)
+stop.sh                    # Bot stoppen (docker compose down)
+install-service.sh         # Systemd-Autostart einrichten
+update.sh                  # Alternatives Host-Wrapper-Skript (ohne Portainer)
 bot/
 ├── bot.py                 # SocialStatsBot(commands.Bot) – Haupt-Bot-Klasse
 ├── database.py            # Database-Klasse – async SQLite Wrapper (mit Migrationen)
@@ -51,6 +55,8 @@ tests/
 └── test_cogs.py           # 18 Tests für Cog-Utilities
 data/
 └── bot.db                 # SQLite-Datenbank (auto-generiert)
+scripts/
+└── discord_notify.py      # Live-Fortschritt für update.sh (Host-seitig)
 docs/
 └── todos.md               # Offene Aufgaben
 ```

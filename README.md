@@ -47,29 +47,58 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 ### Docker
 
 ```bash
-# Standard-Start:
-docker compose up -d --build
+# Bot starten (baut Image, startet im Hintergrund):
+bash start.sh
+
+# Bot stoppen:
+bash stop.sh
+
+# Logs anzeigen:
+docker compose logs -f
 ```
 
 Der Container startet automatisch bei Crash oder Server-Neustart (`restart: unless-stopped`).
 
-Das Quellverzeichnis wird als Volume gemountet, sodass `/admin update` innerhalb des Containers
-`git pull` und `pip install` ausführen und den Bot neu starten kann – ohne den Container neu zu bauen.
+Updates via `/admin update` in Discord: Der `entrypoint.sh` im Container führt
+`git pull`, `git checkout` und `pip install` aus und startet den Bot automatisch neu –
+ohne den Container neu zu bauen.
 
 **Voraussetzung für `/admin update`:**
 SSH-Keys müssen auf dem Host verfügbar sein (`~/.ssh/`), damit `git pull` funktioniert.
 Falls HTTPS statt SSH genutzt wird, die SSH-Zeile in `docker-compose.yml` entfernen und
-git credentials auf dem Host konfigurieren.
+Git-Credentials auf dem Host konfigurieren.
 
-**Alternative mit `update.sh` (ohne Portainer):**
+### Autostart (systemd)
+
+Für automatischen Start bei Server-Neustart:
+
+```bash
+sudo bash install-service.sh
+```
+
+Erstellt einen systemd-Service `social-stats-bot`, der den Container beim Booten startet.
+
+```bash
+sudo systemctl start social-stats-bot    # Bot starten
+sudo systemctl stop social-stats-bot     # Bot stoppen
+sudo systemctl status social-stats-bot   # Status prüfen
+sudo systemctl disable social-stats-bot  # Autostart deaktivieren
+```
+
+> **Hinweis:** Wenn du Portainer verwendest, wird der Autostart bereits über Docker's
+> `restart: unless-stopped` sichergestellt. Der systemd-Service ist nur nötig, wenn
+> Docker selbst nach einem Server-Neustart den Container nicht startet (z.B. weil Docker
+> noch nicht läuft). Bei den meisten Setups reicht `bash start.sh`.
+
+### Alternatives Setup mit `update.sh`
+
+Nur nötig, wenn **kein** Portainer/Docker-Restart verwendet wird. Das Wrapper-Skript
+überwacht den Container im Vordergrund und baut bei `/admin update` das komplette
+Docker-Image neu:
 
 ```bash
 nohup bash update.sh &
 ```
-
-Das Wrapper-Skript `update.sh` startet den Bot und wartet auf Exit-Code 42.
-Wird `/admin update` in Discord ausgeführt, fährt der Bot herunter, das Skript
-pullt die neueste Version und baut den Container automatisch neu.
 
 ### Optionale Konfiguration
 
@@ -210,8 +239,13 @@ pytest tests/ -v
 ├── config.toml.example      # Beispiel-Konfiguration
 ├── requirements.txt         # Python Dependencies
 ├── pytest.ini               # pytest-Konfiguration
-├── Dockerfile               # Docker-Image
-├── docker-compose.yml       # Docker-Compose
+├── start.sh                 # Bot starten (docker compose up)
+├── stop.sh                  # Bot stoppen (docker compose down)
+├── install-service.sh       # Systemd-Autostart einrichten
+├── update.sh                # Alternatives Host-Wrapper-Skript (ohne Portainer)
+├── Dockerfile               # Docker-Image (python:3.11-slim + git)
+├── docker-compose.yml       # Docker-Compose-Konfiguration
+├── entrypoint.sh            # Docker-Entrypoint (Update-Loop)
 ├── bot/
 │   ├── bot.py               # Haupt-Bot-Klasse (SocialStatsBot)
 │   ├── database.py          # SQLite Datenbank-Layer (async, mit Migrationen)
@@ -221,8 +255,8 @@ pytest tests/ -v
 │   ├── pagination.py        # PaginationView (Discord-Buttons)
 │   ├── ratelimit.py         # Token-Bucket Rate-Limiter
 │   ├── cogs/
-│   │   ├── __init__.py       # Shared platform constants & helpers
-│   │   ├── admin.py         # Admin-Commands (Link/Unlink/Accounts/History)
+│   │   ├── __init__.py      # Shared platform constants & helpers
+│   │   ├── admin.py         # Admin-Commands (Link/Unlink/Accounts/History/Setup)
 │   │   ├── settings.py      # Einstellungs-Commands
 │   │   ├── stats.py         # Statistik-Commands (Growth/Overview)
 │   │   ├── refresh.py       # Background-Refresh-Loop + EventSub Bootstrap
@@ -239,6 +273,8 @@ pytest tests/ -v
 │   ├── test_roles.py        # 17 Role-Logic-Tests
 │   └── test_cogs.py         # 18 Cog-Utility-Tests
 ├── data/                    # SQLite DB (auto-erstellt)
+├── scripts/
+│   └── discord_notify.py    # Live-Fortschritt für update.sh
 └── docs/
     └── todos.md             # Aufgaben
 ```

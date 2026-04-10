@@ -1,18 +1,20 @@
 #!/bin/bash
 # ──────────────────────────────────────────────────────────────
-# Host wrapper script for Social-Stats-Bot
+# Host wrapper script for Social-Stats-Bot (ALTERNATIVE SETUP)
 #
+# Only needed if you do NOT use Portainer / Docker restart policy.
 # Runs the bot via Docker Compose in the foreground.  When the
 # container exits with code 42 (triggered by /admin update), the
 # script pulls the latest code, rebuilds the image, and restarts.
 #
+# For Portainer / standard Docker setup, use start.sh instead –
+# the entrypoint.sh inside the container handles updates.
+#
 # Progress is posted back to Discord as a live log by editing the
 # original ephemeral interaction response via the Discord webhook
-# (scripts/discord_notify.py).  The full log is written to
-# data/update.log so the bot can show a final embed on restart.
+# (scripts/discord_notify.py).
 #
-# Usage:  bash update.sh          (runs in foreground)
-#         nohup bash update.sh &  (runs in background)
+# Usage:  nohup bash update.sh &
 # ──────────────────────────────────────────────────────────────
 
 cd "$(dirname "$0")"

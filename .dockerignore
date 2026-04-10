@@ -5,6 +5,7 @@ __pycache__/
 .env
 config.toml
 data/*.db
+.git/
 .github/
 docs/
 *.md

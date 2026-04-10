@@ -25,6 +25,7 @@ docker-compose.yml         # Docker-Compose für einfaches Deployment
 entrypoint.sh              # Docker-Entrypoint (Update-Loop mit git pull + checkout)
 start.sh                   # Bot starten (docker compose up)
 stop.sh                    # Bot stoppen (docker compose down)
+status.sh                  # Status anzeigen (Container + Service + Logs)
 install-service.sh         # Systemd-Autostart einrichten
 update.sh                  # Alternatives Host-Wrapper-Skript (ohne Portainer)
 bot/

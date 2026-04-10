@@ -53,8 +53,11 @@ bash start.sh
 # Bot stoppen:
 bash stop.sh
 
-# Logs anzeigen:
-docker compose logs -f
+# Status anzeigen (Container, Service, Logs):
+bash status.sh
+
+# Live-Logs (kontinuierlich):
+bash status.sh live
 ```
 
 Der Container startet automatisch bei Crash oder Server-Neustart (`restart: unless-stopped`).
@@ -241,6 +244,7 @@ pytest tests/ -v
 ├── pytest.ini               # pytest-Konfiguration
 ├── start.sh                 # Bot starten (docker compose up)
 ├── stop.sh                  # Bot stoppen (docker compose down)
+├── status.sh                # Status anzeigen (Container + Service + Logs)
 ├── install-service.sh       # Systemd-Autostart einrichten
 ├── update.sh                # Alternatives Host-Wrapper-Skript (ohne Portainer)
 ├── Dockerfile               # Docker-Image (python:3.11-slim + git)

@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     request_channel_id         INTEGER DEFAULT 0,
     status_channel_id          INTEGER DEFAULT 0,
     status_message_id          INTEGER DEFAULT 0,
-    status_refresh_interval    INTEGER DEFAULT 30
+    status_refresh_interval    INTEGER DEFAULT 30,
+    disabled_platforms         TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS account_requests (
@@ -242,6 +243,16 @@ class Database:
                     )
             await self.db.commit()
 
+            # Migration: add disabled_platforms column to guild_settings
+            async with self.db.execute("PRAGMA table_info(guild_settings)") as cur:
+                gs_cols4 = {row[1] for row in await cur.fetchall()}
+            if "disabled_platforms" not in gs_cols4:
+                log.info("Adding disabled_platforms column to guild_settings...")
+                await self.db.execute(
+                    "ALTER TABLE guild_settings ADD COLUMN disabled_platforms TEXT DEFAULT ''"
+                )
+                await self.db.commit()
+
             # Migration: update default role patterns from old format
             await self.db.execute("""
                 UPDATE guild_settings
@@ -340,6 +351,15 @@ class Database:
             return await self.get_guild_settings(guild_id)
         return dict(row)
 
+    def get_disabled_platforms(self, settings: dict) -> set[str]:
+        """Return the set of disabled platform names from guild settings."""
+        raw = settings.get("disabled_platforms", "")
+        return {p.strip() for p in raw.split(",") if p.strip()} if raw else set()
+
+    def is_platform_enabled(self, settings: dict, platform: str) -> bool:
+        """Return True if *platform* is enabled in *settings*."""
+        return platform not in self.get_disabled_platforms(settings)
+
     async def update_guild_setting(self, guild_id: int, key: str, value) -> None:
         allowed = {
             "yt_scoreboard_channel_id",
@@ -370,6 +390,7 @@ class Database:
             "status_channel_id",
             "status_message_id",
             "status_refresh_interval",
+            "disabled_platforms",
         }
         if key not in allowed:
             raise ValueError(f"Unknown setting: {key}")

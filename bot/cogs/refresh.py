@@ -60,6 +60,10 @@ class RefreshCog(commands.Cog):
         settings = await self.bot.db.get_guild_settings(guild.id)
 
         for platform in ALL_PLATFORMS:
+            # Skip disabled platforms
+            if not self.bot.db.is_platform_enabled(settings, platform):
+                continue
+
             prefix = PLATFORM_SETTINGS_PREFIX.get(platform, platform[:2])
             interval = settings.get(f"{prefix}_refresh_interval", 600)
 

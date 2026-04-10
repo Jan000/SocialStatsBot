@@ -54,8 +54,12 @@ def _status_indicator(
     health: PlatformHealth | None,
     service_health: dict,
     n_accounts: int,
+    *,
+    disabled: bool = False,
 ) -> tuple[str, str]:
     """Return ``(emoji, label)`` for the platform's health status."""
+    if disabled:
+        return "⬛", "Deaktiviert"
     if n_accounts == 0:
         return "⚪", "Keine Accounts"
     if health is None:
@@ -115,6 +119,9 @@ async def build_status_embed(
         count_label = PLATFORM_COUNT_LABEL[platform]
         interval = settings.get(f"{prefix}_refresh_interval", 600)
 
+        # Check if platform is disabled for this guild
+        platform_disabled = not bot.db.is_platform_enabled(settings, platform)
+
         # Guild-level health (from last refresh cycle)
         guild_health = bot.platform_health.get(guild.id, {})
         health: PlatformHealth | None = guild_health.get(platform)
@@ -135,7 +142,9 @@ async def build_status_embed(
         ]
 
         # Status indicator
-        s_emoji, s_label = _status_indicator(health, svc_health, n_accounts)
+        s_emoji, s_label = _status_indicator(
+            health, svc_health, n_accounts, disabled=platform_disabled,
+        )
         if s_emoji == "🔴":
             any_error = True
             all_ok = False

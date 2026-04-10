@@ -38,6 +38,7 @@ from bot.roles import (
 )
 from bot.scoreboard import update_count_channel, update_scoreboard
 from bot.pagination import PaginationView, paginate_lines
+from bot.database import ALL_PLATFORMS
 
 log = logging.getLogger(__name__)
 
@@ -287,13 +288,18 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        from bot.database import ALL_PLATFORMS
         platforms = [platform.value] if platform else list(ALL_PLATFORMS)
+        settings = await self.bot.db.get_guild_settings(interaction.guild_id)
         total_updated = 0
+        skipped_disabled: list[str] = []
 
         for plat in platforms:
+            # Skip disabled platforms (unless explicitly requested)
+            if not platform and not self.bot.db.is_platform_enabled(settings, plat):
+                skipped_disabled.append(plat)
+                continue
+
             accounts = await self.bot.db.get_all_linked(interaction.guild_id, plat)
-            settings = await self.bot.db.get_guild_settings(interaction.guild_id)
 
             for acc in accounts:
                 count = await fetch_count(self.bot, plat, acc)
@@ -325,10 +331,11 @@ class AdminCog(commands.GroupCog, group_name="admin"):
             await update_scoreboard(self.bot, interaction.guild, plat, settings)
             await update_count_channel(self.bot, interaction.guild, plat, settings)
 
-        await interaction.followup.send(
-            f"✅ Refresh abgeschlossen. **{total_updated}** Account(s) aktualisiert.",
-            ephemeral=True,
-        )
+        msg = f"✅ Refresh abgeschlossen. **{total_updated}** Account(s) aktualisiert."
+        if skipped_disabled:
+            names = ", ".join(p.title() for p in skipped_disabled)
+            msg += f"\n⬛ Übersprungen (deaktiviert): {names}"
+        await interaction.followup.send(msg, ephemeral=True)
 
     # ── /admin history ───────────────────────────────────────────────
 
@@ -435,6 +442,61 @@ class AdminCog(commands.GroupCog, group_name="admin"):
                 await interaction.response.send_message(msg, ephemeral=True)
             else:
                 await interaction.followup.send(msg, ephemeral=True)
+
+    # ── /admin update ────────────────────────────────────────────────
+
+    # ── /admin setup ───────────────────────────────────────────────
+
+    @app_commands.command(
+        name="setup",
+        description="Richtet alle Kanäle und Einstellungen automatisch ein.",
+    )
+    async def setup(self, interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if not guild.me.guild_permissions.manage_channels:
+            await interaction.response.send_message(
+                "❌ Der Bot benötigt die Berechtigung **Kanäle verwalten**.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Create category
+        category = await guild.create_category("📊 Social Stats")
+
+        # Create channels under the category
+        scoreboard_ch = await guild.create_text_channel("scoreboard", category=category)
+        request_ch = await guild.create_text_channel("anfragen", category=category)
+        status_ch = await guild.create_text_channel("bot-status", category=category)
+
+        # Configure settings for each platform scoreboard → same channel
+        for plat in ALL_PLATFORMS:
+            prefix = PLATFORM_SETTINGS_PREFIX[plat]
+            await self.bot.db.update_guild_setting(
+                guild.id, f"{prefix}_scoreboard_channel_id", scoreboard_ch.id
+            )
+
+        # Configure request & status channels
+        await self.bot.db.update_guild_setting(guild.id, "request_channel_id", request_ch.id)
+        await self.bot.db.update_guild_setting(guild.id, "status_channel_id", status_ch.id)
+        await self.bot.db.update_guild_setting(guild.id, "status_message_id", 0)
+
+        # Trigger initial status update
+        status_cog = self.bot.get_cog("StatusCog")
+        if status_cog:
+            await status_cog.force_update(guild)
+
+        await interaction.followup.send(
+            "✅ **Setup abgeschlossen!**\n\n"
+            f"📋 **Kategorie:** {category.mention}\n"
+            f"📊 **Scoreboard:** {scoreboard_ch.mention}\n"
+            f"📬 **Anfragen:** {request_ch.mention}\n"
+            f"🔧 **Bot-Status:** {status_ch.mention}\n\n"
+            "Alle Plattform-Scoreboards werden in den Scoreboard-Kanal gepostet.\n"
+            "Verknüpfe jetzt Accounts mit `/admin link`.",
+            ephemeral=True,
+        )
 
     # ── /admin update ────────────────────────────────────────────────
 

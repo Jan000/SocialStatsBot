@@ -32,8 +32,8 @@ bot/
 ├── ratelimit.py           # Token-Bucket Rate-Limiter für API-Requests
 ├── cogs/
 │   ├── __init__.py        # Shared platform constants & helpers (PLATFORM_CHOICES, resolve_platform, fetch_count etc.)
-│   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts)
-│   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel & Status)
+│   ├── admin.py           # Admin-Commands (link/unlink/refresh/history/accounts/setup)
+│   ├── settings.py        # Einstellungs-Commands (alle Guild-Settings inkl. Count-Channel, Status & Platform-Toggle)
 │   ├── stats.py           # Statistik-Commands (growth/overview)
 │   ├── refresh.py         # Background-Tasks (periodischer Count-Refresh + EventSub Bootstrap + Health-Tracking)
 │   ├── request.py         # User-Anfragen (Link/Unlink mit Admin-Approval-Buttons + Scoreboard-Button)
@@ -71,6 +71,7 @@ docs/
 - **Multi-Account**: UNIQUE auf `(guild_id, discord_user_id, platform, platform_id)` – ein User kann mehrere Accounts pro Plattform haben
 - **History-Deduplizierung**: Bei gleichbleibendem Count werden nur Start- und End-Zeitstempel gespeichert
 - **Status-Channel**: `status_channel_id`, `status_message_id`, `status_refresh_interval` in `guild_settings`
+- **Disabled Platforms**: `disabled_platforms` TEXT (comma-separated, z.B. `"instagram,tiktok"`) in `guild_settings` – Helper: `db.get_disabled_platforms(settings)` → `set[str]`, `db.is_platform_enabled(settings, platform)` → `bool`
 
 ### Datenbank-Migrationen
 - **Der gegenwärtige Zustand der Datenbank ist immer unbekannt** – die `_migrate()`-Methode muss mit jeder möglichen Schema-Version umgehen
@@ -138,6 +139,21 @@ docs/
 - Gesamt-Farbe: 🟢 grün (alles OK), 🟡 gelb (teilweise gestört), 🔴 rot (kritisch)
 - Settings: `status_channel_id`, `status_message_id`, `status_refresh_interval` (Standard: 30s)
 - `force_update()` auf `StatusCog` für sofortige Aktualisierung aus Settings-Commands
+- Deaktivierte Plattformen werden als ⬛ „Deaktiviert" im Status-Embed angezeigt
+
+### Platform-Toggle
+- `/settings toggle_platform <platform>` schaltet eine Plattform ein/aus
+- Gespeichert in `disabled_platforms` (comma-separated TEXT in `guild_settings`)
+- Deaktivierte Plattformen werden im Background-Refresh und bei `force_refresh` (ohne explizite Plattform) übersprungen
+- Admin-Commands (`/admin link`, `/admin force_refresh <platform>`) funktionieren auch für deaktivierte Plattformen (Admin-Override)
+- `/settings show` zeigt den Status (✅/❌) jeder Plattform an
+
+### Quick-Setup (`/admin setup`)
+- Erstellt Kategorie „📊 Social Stats" mit 3 Kanälen: #scoreboard, #anfragen, #bot-status
+- Konfiguriert alle Plattform-Scoreboards auf den gemeinsamen Scoreboard-Kanal
+- Setzt Request- und Status-Kanal in den Guild-Settings
+- Löst initiales Status-Update aus
+- Benötigt Bot-Berechtigung „Kanäle verwalten"
 
 ### API-Services
 - `YouTubeService`, `TwitchService`, `InstagramService`, `TikTokService` in `bot/services/`
@@ -163,7 +179,7 @@ docs/
 - Erlaubte Setting-Keys sind in `Database.update_guild_setting()` whitegelistet
 - Setting-Prefixe: `yt_` (YouTube), `tw_` (Twitch), `ig_` (Instagram), `tt_` (TikTok)
 - Count-Channel-Keys: `{prefix}_count_channel_id`, `{prefix}_count_channel_pattern`
-- Globale Keys: `request_channel_id` (Anfragen-Kanal für User-Requests), `status_channel_id`, `status_message_id`, `status_refresh_interval`
+- Globale Keys: `request_channel_id` (Anfragen-Kanal für User-Requests), `status_channel_id`, `status_message_id`, `status_refresh_interval`, `disabled_platforms`
 
 ## Git-Workflow
 

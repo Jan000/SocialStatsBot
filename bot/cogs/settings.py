@@ -65,11 +65,15 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
 
         lines = ["**⚙️ Aktuelle Einstellungen:**\n"]
 
+        disabled = self.bot.db.get_disabled_platforms(s)
+
         # Platform-specific settings (data-driven loop)
         for plat in ALL_PLATFORMS:
             prefix = PLATFORM_SETTINGS_PREFIX[plat]
             emoji = PLATFORM_EMOJI.get(plat, "")
             name = plat.title()
+            state = "❌ Deaktiviert" if plat in disabled else "✅ Aktiviert"
+            lines.append(f"{emoji} **{name}:** {state}")
             lines.append(f"{emoji} **{name} Scoreboard-Kanal:** {ch(s[f'{prefix}_scoreboard_channel_id'])}")
             lines.append(f"{emoji} **{name} Refresh-Intervall:** {s[f'{prefix}_refresh_interval']}s")
             lines.append(f"{emoji} **{name} Rollen-Pattern:** `{s[f'{prefix}_default_role_pattern']}`")
@@ -439,6 +443,46 @@ class SettingsCog(commands.GroupCog, group_name="settings"):
         status_cog = self.bot.get_cog("StatusCog")
         if status_cog and interaction.guild:
             await status_cog.force_update(interaction.guild)
+
+    # ── /settings toggle_platform ───────────────────────────────────
+
+    @app_commands.command(
+        name="toggle_platform",
+        description="Aktiviert oder deaktiviert eine Plattform für diesen Server.",
+    )
+    @app_commands.describe(platform="Plattform zum Umschalten")
+    @app_commands.choices(platform=PLATFORM_CHOICES)
+    async def toggle_platform(
+        self,
+        interaction: discord.Interaction,
+        platform: app_commands.Choice[str],
+    ) -> None:
+        settings = await self.bot.db.get_guild_settings(interaction.guild_id)
+        disabled = self.bot.db.get_disabled_platforms(settings)
+        plat = platform.value
+
+        if plat in disabled:
+            disabled.discard(plat)
+            new_state = "aktiviert ✅"
+        else:
+            disabled.add(plat)
+            new_state = "deaktiviert ❌"
+
+        raw = ",".join(sorted(disabled)) if disabled else ""
+        await self.bot.db.update_guild_setting(
+            interaction.guild_id, "disabled_platforms", raw
+        )
+
+        # Build overview of all platforms
+        lines = [f"✅ **{platform.name}** wurde **{new_state}**.\n"]
+        for p in ALL_PLATFORMS:
+            e = PLATFORM_EMOJI.get(p, "")
+            state = "❌ Deaktiviert" if p in disabled else "✅ Aktiviert"
+            lines.append(f"{e} **{p.title()}:** {state}")
+
+        await interaction.response.send_message(
+            "\n".join(lines), ephemeral=True
+        )
 
     # ── /settings status_refresh_interval ──────────────────────────────
 

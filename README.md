@@ -15,13 +15,15 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 - **Pagination** – Blättern durch lange Listen (Historie, Accounts) per Discord-Buttons
 - **Rate-Limiting** – Token-Bucket Rate-Limiter für YouTube- und Twitch-API-Anfragen
 - **Twitch EventSub** – Optionale WebSocket-Integration für Echtzeit-Channel-Updates
-- **Docker-Support** – Deployment via `docker compose up`
+- **Docker-Support** – Deployment via `docker compose up` mit Auto-Restart bei Crash/Server-Neustart
 - **Historien-Tracking** – Alle Änderungen dedupliziert in SQLite gespeichert
 - **Flexible Eingabe** – Usernames, URLs, @Handles und Channel-IDs werden überall akzeptiert (das `@` ist optional und wird automatisch ergänzt)
 - **Auto-Plattform-Erkennung** – Bei URL-Eingabe wird die Plattform automatisch erkannt (kein manuelles Auswählen nötig)
 - **User-Anfragen-System** – Normale User können Link/Unlink-Anfragen stellen, Admins bestätigen per Button. Link-Anfragen auch direkt über den Scoreboard-Button möglich.
 - **Admin-Status-Channel** – Konfigurierbarer Kanal mit detailliertem Bot-Status (Plattform-Health, Refresh-Zyklen, Fehler, Cooldowns), auto-aktualisiert (Standard: 30s)
 - **Discord-native Permissions** – Zugriff wird über Server-Einstellungen > Integrationen gesteuert
+- **Plattform An/Aus** – Einzelne Plattformen per Command deaktivieren/aktivieren
+- **Quick-Setup** – Automatische Einrichtung aller Kanäle mit einem Command (`/admin setup`)
 
 ## Setup
 
@@ -76,6 +78,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 | `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen (paginiert) |
 | `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |
 | `/admin history <user> <platform> <account_name>` | Abo-/Follower-Verlauf anzeigen (Autocomplete, paginiert) |
+| `/admin setup` | Automatisches Setup: erstellt Kategorie + Kanäle und konfiguriert alles |
 | `/admin update` | Bot aktualisieren (git pull + rebuild). Nur Bot-Owner. |
 
 ### Statistik-Commands (`/stats ...`)
@@ -108,6 +111,7 @@ Für alle User zugänglich. Anfragen werden im konfigurierten Anfragen-Kanal gep
 | `/settings count_channel_pattern <platform> <pattern>` | Count-Channel-Pattern (`{count}` als Platzhalter) |
 | `/settings request_channel <channel>` | Anfragen-Kanal für User-Link/Unlink-Requests setzen |
 | `/settings status_channel <channel>` | Admin-Status-Kanal setzen (zeigt detaillierten Bot-Status) |
+| `/settings toggle_platform <platform>` | Plattform aktivieren oder deaktivieren |
 | `/settings status_refresh_interval <seconds>` | Aktualisierungs-Intervall für den Status-Kanal (10–3600s, Standard: 30s) |
 
 ## Rollen-System
@@ -144,6 +148,25 @@ Normale User können über `/request link` und `/request unlink` Anfragen stelle
 4. Ein **Admin klickt** auf Annehmen oder Ablehnen – der Bot führt die Aktion automatisch aus
 
 Konfiguration: `/settings request_channel <channel>` setzt den Kanal für Anfragen.
+
+## Plattform An/Aus
+
+Einzelne Plattformen können pro Server deaktiviert werden:
+- `/settings toggle_platform <platform>` – Schaltet die Plattform um
+- Deaktivierte Plattformen werden im Background-Refresh und bei `/admin force_refresh` übersprungen
+- Im Status-Channel werden deaktivierte Plattformen als ⬛ angezeigt
+- Admin-Commands wie `/admin link` funktionieren weiterhin (Admin-Override)
+- `/settings show` zeigt den Status jeder Plattform an
+
+## Quick-Setup
+
+`/admin setup` richtet den Bot automatisch für einen neuen Server ein:
+1. Erstellt die Kategorie **📊 Social Stats**
+2. Erstellt Kanäle: **#scoreboard**, **#anfragen**, **#bot-status**
+3. Konfiguriert alle Einstellungen (Scoreboard, Anfragen, Status)
+4. Löst ein initiales Status-Update aus
+
+Danach müssen nur noch Accounts verknüpft werden (`/admin link`).
 
 ## Admin-Status-Channel
 
@@ -235,4 +258,5 @@ Alle geplanten Features sind implementiert:
 | History-Deduplizierung | Reduziert DB-Größe bei gleichbleibendem Count |
 | Token-Bucket Rate-Limiting | Respektiert API-Quotas |
 | EventSub WebSocket (optional) | Echtzeit-Updates ohne öffentliche URL |
-| Docker-Support | Einfaches Deployment mit `docker compose up` |
+| Docker-Support | Einfaches Deployment mit `docker compose up`, Auto-Restart |
+| Disabled Platforms | Comma-separated TEXT-Feld statt je einer Spalte pro Plattform |

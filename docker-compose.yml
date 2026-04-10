@@ -3,7 +3,7 @@ services:
     build: .
     restart: unless-stopped
     volumes:
-      # Persist the SQLite database
-      - ./data:/app/data
-      # Mount config (must exist before starting)
-      - ./config.toml:/app/config.toml:ro
+      # Mount source code so /admin update can git pull
+      - .:/app
+      # SSH keys for git pull (adjust path if using HTTPS instead)
+      - ~/.ssh:/root/.ssh:ro

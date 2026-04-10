@@ -47,14 +47,25 @@ Ein Discord-Bot, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follower und
 ### Docker
 
 ```bash
-# Einmaliger Start:
+# Standard-Start:
 docker compose up -d --build
-
-# Mit Auto-Update-Support (empfohlen):
-./update.sh
 ```
 
-`data/`-Verzeichnis und `config.toml` werden als Volumes gemountet.
+Der Container startet automatisch bei Crash oder Server-Neustart (`restart: unless-stopped`).
+
+Das Quellverzeichnis wird als Volume gemountet, sodass `/admin update` innerhalb des Containers
+`git pull` und `pip install` ausführen und den Bot neu starten kann – ohne den Container neu zu bauen.
+
+**Voraussetzung für `/admin update`:**
+SSH-Keys müssen auf dem Host verfügbar sein (`~/.ssh/`), damit `git pull` funktioniert.
+Falls HTTPS statt SSH genutzt wird, die SSH-Zeile in `docker-compose.yml` entfernen und
+git credentials auf dem Host konfigurieren.
+
+**Alternative mit `update.sh` (ohne Portainer):**
+
+```bash
+nohup bash update.sh &
+```
 
 Das Wrapper-Skript `update.sh` startet den Bot und wartet auf Exit-Code 42.
 Wird `/admin update` in Discord ausgeführt, fährt der Bot herunter, das Skript

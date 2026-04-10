@@ -20,8 +20,9 @@ Discord-Bot in Python, der YouTube-Abonnenten, Twitch-Follower, Instagram-Follow
 main.py                    # Entry Point
 config.toml                # Bot-Token + API-Keys (nicht im Git)
 pytest.ini                 # pytest-Konfiguration
-Dockerfile                 # Docker-Image (python:3.11-slim)
+Dockerfile                 # Docker-Image (python:3.11-slim + git)
 docker-compose.yml         # Docker-Compose für einfaches Deployment
+entrypoint.sh              # Docker-Entrypoint (Update-Loop mit git pull)
 bot/
 ├── bot.py                 # SocialStatsBot(commands.Bot) – Haupt-Bot-Klasse
 ├── database.py            # Database-Klasse – async SQLite Wrapper (mit Migrationen)

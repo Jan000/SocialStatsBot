@@ -117,7 +117,7 @@ Standardmäßig auf Server-Administratoren beschränkt. Zugriff kann in Server-E
 | Command | Beschreibung |
 |---|---|
 | `/admin link <user> <channel_input> [platform]` | Account verknüpfen (Plattform wird aus URL erkannt oder manuell gewählt) |
-| `/admin unlink <user> <platform> <account_name>` | Bestimmten Account entfernen (Autocomplete) |
+| `/admin unlink <platform> <account_name> [user]` | Account entfernen (Autocomplete – ohne `user` werden auch Accounts von Ex-Mitgliedern angezeigt) |
 | `/admin accounts <user>` | Alle verknüpften Accounts eines Users anzeigen (paginiert) |
 | `/admin force_refresh [platform]` | Sofortiger Refresh aller Accounts |
 | `/admin history <user> <platform> <account_name>` | Abo-/Follower-Verlauf anzeigen (Autocomplete, paginiert) |

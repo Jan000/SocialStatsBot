@@ -54,25 +54,49 @@ class AdminCog(commands.GroupCog, group_name="admin"):
     async def _account_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for account_name parameters (needs user + platform in namespace)."""
+        """Autocomplete for account_name parameters.
+
+        - If `user` is in namespace → list only that user's accounts (value = platform_name).
+        - If `user` is missing → list ALL accounts on this guild+platform, including
+          orphaned accounts of users who left. Value is encoded as
+          ``"<discord_user_id>:<platform_id>"`` so the unlink handler can act
+          without a Discord user reference.
+        """
         guild_id = interaction.guild_id
         if not guild_id:
             return []
 
-        user = getattr(interaction.namespace, "user", None)
         platform = getattr(interaction.namespace, "platform", None)
-        if not user or not platform:
+        if not platform:
             return []
-
-        user_id = user.id if hasattr(user, "id") else int(user)
         plat = platform.value if hasattr(platform, "value") else str(platform)
 
-        accounts = await self.bot.db.get_linked_accounts_for_user(guild_id, user_id, plat)
-        return [
-            app_commands.Choice(name=a["platform_name"], value=a["platform_name"])
-            for a in accounts
-            if a["platform_name"] and current.lower() in a["platform_name"].lower()
-        ][:25]
+        user = getattr(interaction.namespace, "user", None)
+
+        if user:
+            user_id = user.id if hasattr(user, "id") else int(user)
+            accounts = await self.bot.db.get_linked_accounts_for_user(guild_id, user_id, plat)
+            return [
+                app_commands.Choice(name=a["platform_name"], value=a["platform_name"])
+                for a in accounts
+                if a["platform_name"] and current.lower() in a["platform_name"].lower()
+            ][:25]
+
+        # No user given – show all accounts on this guild+platform.
+        accounts = await self.bot.db.get_all_linked(guild_id, plat)
+        choices: list[app_commands.Choice[str]] = []
+        for a in accounts:
+            member = interaction.guild.get_member(a["discord_user_id"]) if interaction.guild else None
+            if member:
+                user_label = member.display_name
+            else:
+                user_label = f"User-ID {a['discord_user_id']} (nicht auf Server)"
+            label = f"{a['platform_name']} – {user_label}"
+            if current and current.lower() not in label.lower():
+                continue
+            value = f"{a['discord_user_id']}:{a['platform_id']}"
+            choices.append(app_commands.Choice(name=label[:100], value=value[:100]))
+        return choices[:25]
 
     # ── /admin link ────────────────────────────────────────────────
 
@@ -160,48 +184,90 @@ class AdminCog(commands.GroupCog, group_name="admin"):
 
     @app_commands.command(
         name="unlink",
-        description="Entfernt die Verknüpfung eines Accounts von einem Discord-User.",
+        description="Entfernt die Verknüpfung eines Accounts (User optional bei Ex-Mitgliedern).",
     )
     @app_commands.describe(
-        user="Discord-User",
         platform="Plattform",
-        account_name="Name des Accounts (z.B. Niruki)",
+        account_name="Name des Accounts (Autocomplete)",
+        user="Discord-User (optional – ohne Angabe werden alle Accounts angezeigt)",
     )
     @app_commands.choices(platform=PLATFORM_CHOICES)
     async def unlink(
         self,
         interaction: discord.Interaction,
-        user: discord.Member,
         platform: app_commands.Choice[str],
         account_name: str,
+        user: discord.User | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        plat_value = platform.value
 
-        account = await self.bot.db.find_linked_account_by_name(
-            interaction.guild_id, user.id, platform.value, account_name
-        )
-        if account is None:
-            await interaction.followup.send(
-                f"❌ Kein {platform.name}-Account mit dem Namen **{account_name}** "
-                f"für {user.mention} gefunden.",
-                ephemeral=True,
+        # Resolve the account – two paths depending on whether `user` is given.
+        if user is not None:
+            account = await self.bot.db.find_linked_account_by_name(
+                interaction.guild_id, user.id, plat_value, account_name
             )
-            return
+            if account is None:
+                await interaction.followup.send(
+                    f"❌ Kein {platform.name}-Account mit dem Namen **{account_name}** "
+                    f"für {user.mention} gefunden.",
+                    ephemeral=True,
+                )
+                return
+            target_user_id = user.id
+        else:
+            # Without user, the autocomplete value is "user_id:platform_id".
+            if ":" not in account_name:
+                await interaction.followup.send(
+                    "❌ Bitte wähle einen Account aus dem Autocomplete-Vorschlag "
+                    "oder gib einen Discord-User an.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                uid_str, platform_id = account_name.split(":", 1)
+                target_user_id = int(uid_str)
+            except ValueError:
+                await interaction.followup.send(
+                    "❌ Ungültige Account-Auswahl.", ephemeral=True
+                )
+                return
+            account = await self.bot.db.get_linked_account(
+                interaction.guild_id, target_user_id, plat_value, platform_id
+            )
+            if account is None:
+                await interaction.followup.send(
+                    "❌ Account nicht gefunden (eventuell bereits entfernt).",
+                    ephemeral=True,
+                )
+                return
 
         platform_name = account["platform_name"]
         await self.bot.db.unlink_account(
-            interaction.guild_id, user.id, platform.value, account["platform_id"]
+            interaction.guild_id, target_user_id, plat_value, account["platform_id"]
         )
 
-        # Remove account-specific roles
-        await remove_account_roles(interaction.guild, user, platform.value, platform_name)
-        await cleanup_unused_roles(interaction.guild, platform.value)
+        # Remove account-specific roles only if the member is still on the guild.
+        member = guild.get_member(target_user_id) if guild else None
+        if member:
+            await remove_account_roles(guild, member, plat_value, platform_name)
+        await cleanup_unused_roles(guild, plat_value)
+
         # Update scoreboard & count-channel immediately (DB-only, no API re-fetch)
         settings = await self.bot.db.get_guild_settings(interaction.guild_id)
-        await update_scoreboard(self.bot, interaction.guild, platform.value, settings)
-        await update_count_channel(self.bot, interaction.guild, platform.value, settings)
+        await update_scoreboard(self.bot, guild, plat_value, settings)
+        await update_count_channel(self.bot, guild, plat_value, settings)
+
+        # Build response
+        if member:
+            who = member.mention
+        elif user:
+            who = user.mention
+        else:
+            who = f"User-ID `{target_user_id}` (nicht mehr auf dem Server)"
         await interaction.followup.send(
-            f"✅ **{platform_name}** ({platform.name}) von {user.mention} entfernt.",
+            f"✅ **{platform_name}** ({platform.name}) von {who} entfernt.",
             ephemeral=True,
         )
 

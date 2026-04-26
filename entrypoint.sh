@@ -51,8 +51,11 @@ while true; do
             ;;
     esac
 
-    if git pull >> "$LOG_FILE" 2>&1 && git checkout -f >> "$LOG_FILE" 2>&1; then
-        echo "✅ git pull erfolgreich" >> "$LOG_FILE"
+    if git fetch --all --prune >> "$LOG_FILE" 2>&1 \
+        && BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo main)" \
+        && git reset --hard "origin/$BRANCH" >> "$LOG_FILE" 2>&1 \
+        && git clean -fd >> "$LOG_FILE" 2>&1; then
+        echo "✅ git pull erfolgreich (hard reset auf origin/$BRANCH)" >> "$LOG_FILE"
     else
         echo "❌ git pull fehlgeschlagen" >> "$LOG_FILE"
         echo "EXIT=error" >> "$LOG_FILE"

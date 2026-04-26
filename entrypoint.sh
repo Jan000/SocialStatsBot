@@ -34,6 +34,23 @@ while true; do
 
     # Step 1: git pull + checkout (update .git, then apply to working tree)
     echo "── git pull ──────────────────────────" >> "$LOG_FILE"
+
+    # Rewrite SSH origin to HTTPS so the container does not need SSH keys
+    # or known_hosts.  Works for any public GitHub fork.
+    ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || true)"
+    case "$ORIGIN_URL" in
+        git@github.com:*)
+            NEW_URL="https://github.com/${ORIGIN_URL#git@github.com:}"
+            git remote set-url origin "$NEW_URL" >> "$LOG_FILE" 2>&1 || true
+            echo "ℹ Origin auf HTTPS umgestellt: $NEW_URL" >> "$LOG_FILE"
+            ;;
+        ssh://git@github.com/*)
+            NEW_URL="https://github.com/${ORIGIN_URL#ssh://git@github.com/}"
+            git remote set-url origin "$NEW_URL" >> "$LOG_FILE" 2>&1 || true
+            echo "ℹ Origin auf HTTPS umgestellt: $NEW_URL" >> "$LOG_FILE"
+            ;;
+    esac
+
     if git pull >> "$LOG_FILE" 2>&1 && git checkout -f >> "$LOG_FILE" 2>&1; then
         echo "✅ git pull erfolgreich" >> "$LOG_FILE"
     else
